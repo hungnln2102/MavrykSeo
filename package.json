@@ -1,0 +1,23 @@
+{
+  "name": "seo-ai-platform",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rimraf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.14",
+    "typescript": "^5.5.4",
+    "prettier": "^3.3.3",
+    "eslint": "^9.9.0",
+    "rimraf": "^6.0.1"
+  }
+}

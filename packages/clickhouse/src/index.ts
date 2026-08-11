@@ -6,3 +6,5 @@ export const clickhouse = createClient({
   password: process.env.CLICKHOUSE_PASSWORD || '',
   database: process.env.CLICKHOUSE_DB || 'default',
 });
+
+export * from './init.js';

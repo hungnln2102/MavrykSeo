@@ -1,14 +1,19 @@
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: seo
       POSTGRES_PASSWORD: seo
       POSTGRES_DB: seo_platform
-    ports: ["5432:5432"]
+    ports: ["5435:5432"]
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     ports: ["8123:8123","9000:9000"]
+    environment:
+      CLICKHOUSE_DB: seo_platform
+      CLICKHOUSE_USER: seo
+      CLICKHOUSE_PASSWORD: seo
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]

@@ -40,10 +40,43 @@ export default function Page() {
   const [projectId, setProjectId] = useState<string | null>(null);
 
   // Content Marketing States
-  const [contentSubTab, setContentSubTab] = useState<'topics' | 'calendar' | 'editor'>('calendar');
+  const [contentSubTab, setContentSubTab] = useState<'topics' | 'calendar' | 'editor' | 'research'>('calendar');
+  
+  // Import URL, Publish & Performance/Decay States
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrlStr, setImportUrlStr] = useState('');
+  const [importKeyword, setImportKeyword] = useState('');
+  const [importTopicId, setImportTopicId] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [publishUrlStr, setPublishUrlStr] = useState('');
+  const [publishingPlanId, setPublishingPlanId] = useState<string | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+
+  const [performanceData, setPerformanceData] = useState<any>(null);
+  const [loadingPerformance, setLoadingPerformance] = useState(false);
+
+  const [decayedPlansList, setDecayedPlansList] = useState<any[]>([]);
+  const [loadingDecay, setLoadingDecay] = useState(false);
+
   const [topicsList, setTopicsList] = useState<any[]>([]);
   const [contentPlansList, setContentPlansList] = useState<any[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const currentPlan = contentPlansList.find(p => p.id === selectedPlanId);
+
+  // Keyword Research, Clustering & Competitor Gap States
+  const [keywordResearchInput, setKeywordResearchInput] = useState('');
+  const [keywordResearchResult, setKeywordResearchResult] = useState<any>(null);
+  const [isResearchingKeyword, setIsResearchingKeyword] = useState(false);
+
+  const [keywordClusteringInput, setKeywordClusteringInput] = useState('');
+  const [keywordClusteringResult, setKeywordClusteringResult] = useState<any[]>([]);
+  const [isClusteringKeywords, setIsClusteringKeywords] = useState(false);
+
+  const [competitorGapResult, setCompetitorGapResult] = useState<any[]>([]);
+  const [isLoadingCompetitorGap, setIsLoadingCompetitorGap] = useState(false);
+  const [researchSubTab, setResearchSubTab] = useState<'single' | 'clustering' | 'gap'>('single');
 
   // Content Creation Form States
   const [newTopicName, setNewTopicName] = useState('');
@@ -218,6 +251,7 @@ export default function Page() {
     fetchKeywords();
     fetchMembers();
     fetchReports();
+    fetchDecayedPlans();
   }, [token, workspaceId, projectId]);
 
   // Debounced Real-time Content Optimization
@@ -230,6 +264,61 @@ export default function Page() {
 
     return () => clearTimeout(timer);
   }, [editorBody, selectedPlanId]);
+
+  // Fetch performance data when a published content plan is selected
+  React.useEffect(() => {
+    if (selectedPlanId) {
+      const plan = contentPlansList.find(p => p.id === selectedPlanId);
+      if (plan && plan.status === 'published') {
+        fetchPerformanceData(selectedPlanId);
+      } else {
+        setPerformanceData(null);
+      }
+    } else {
+      setPerformanceData(null);
+    }
+  }, [selectedPlanId, contentPlansList]);
+
+  const getInternalLinkSuggestions = () => {
+    if (!selectedPlanId) return [];
+    const currentPlan = contentPlansList.find(p => p.id === selectedPlanId);
+    if (!currentPlan) return [];
+
+    // Find other published plans
+    return contentPlansList
+      .filter(p => p.id !== selectedPlanId && p.status === 'published' && p.publishUrl)
+      .map(p => {
+        // Compute relevance score
+        let score = 0;
+        let reason = '';
+
+        if (p.topicId && p.topicId === currentPlan.topicId) {
+          score += 50;
+          reason = 'Same Topic Hub';
+        }
+
+        const currentKeywords = [currentPlan.primaryKeyword, ...(currentPlan.secondaryKeywords || [])];
+        const peerKeywords = [p.primaryKeyword, ...(p.secondaryKeywords || [])];
+        const overlap = currentKeywords.filter(k => peerKeywords.includes(k));
+
+        if (overlap.length > 0) {
+          score += overlap.length * 30;
+          reason = reason ? `${reason} & Overlapping Keywords` : 'Overlapping Keywords';
+        }
+
+        return {
+          id: p.id,
+          title: p.title,
+          url: p.publishUrl,
+          keyword: p.primaryKeyword,
+          score,
+          reason: reason || 'Related Hub',
+        };
+      })
+      .filter(p => p.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  };
 
   async function fetchTopics() {
     if (!token || !workspaceId || !projectId) return;
@@ -729,6 +818,301 @@ export default function Page() {
     }
   }
 
+  async function handleImportUrl() {
+    if (!importUrlStr.trim() || !importKeyword.trim() || !token || !workspaceId || !projectId) {
+      alert('Please enter a URL and a Primary Keyword');
+      return;
+    }
+
+    try {
+      setIsImporting(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/import-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          url: importUrlStr,
+          primaryKeyword: importKeyword,
+          topicId: importTopicId || undefined,
+        }),
+      });
+
+      if (res.ok) {
+        setImportUrlStr('');
+        setImportKeyword('');
+        setImportTopicId('');
+        setShowImportModal(false);
+        fetchContentPlans();
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        alert(`Failed to import URL: ${errorData.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error importing URL:', err);
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function handlePublishContent() {
+    if (!publishUrlStr.trim() || !publishingPlanId || !token || !workspaceId || !projectId) {
+      alert('Please enter the Live Publish URL');
+      return;
+    }
+
+    try {
+      setIsPublishing(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/${publishingPlanId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          status: 'published',
+          publishUrl: publishUrlStr,
+        }),
+      });
+
+      if (res.ok) {
+        setPublishUrlStr('');
+        setPublishingPlanId(null);
+        setShowPublishModal(false);
+        fetchContentPlans();
+        fetchDecayedPlans(); // Refresh decayed plans list if any
+      } else {
+        alert('Failed to publish content plan');
+      }
+    } catch (err) {
+      console.error('Error publishing content plan:', err);
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
+  async function fetchPerformanceData(planId: string) {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      setLoadingPerformance(true);
+      setPerformanceData(null);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/${planId}/performance`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setPerformanceData(data);
+      }
+    } catch (err) {
+      console.error('Error fetching performance data:', err);
+    } finally {
+      setLoadingPerformance(false);
+    }
+  }
+
+  async function fetchDecayedPlans() {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      setLoadingDecay(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/decayed`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+
+      if (res.ok) {
+        setDecayedPlansList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching decayed plans:', err);
+    } finally {
+      setLoadingDecay(false);
+    }
+  }
+
+  async function handleRefreshContent(planId: string) {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/${planId}/refresh`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+
+      if (res.ok) {
+        fetchContentPlans();
+        fetchDecayedPlans();
+        alert('Content plan is now set back to Planned status for update.');
+      } else {
+        alert('Failed to refresh content plan');
+      }
+    } catch (err) {
+      console.error('Error refreshing content plan:', err);
+    }
+  }
+
+  async function handleResearchKeyword() {
+    if (!keywordResearchInput.trim() || !token || !workspaceId || !projectId) {
+      alert('Please enter a keyword to research.');
+      return;
+    }
+
+    try {
+      setIsResearchingKeyword(true);
+      setKeywordResearchResult(null);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords/research`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ keyword: keywordResearchInput.trim() }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setKeywordResearchResult(data);
+      } else {
+        const errData = await res.json();
+        alert(`Failed to perform keyword research: ${errData.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error in keyword research:', err);
+    } finally {
+      setIsResearchingKeyword(false);
+    }
+  }
+
+  async function handleClusterKeywords() {
+    if (!keywordClusteringInput.trim() || !token || !workspaceId || !projectId) {
+      alert('Please enter keywords to cluster.');
+      return;
+    }
+
+    try {
+      setIsClusteringKeywords(true);
+      setKeywordClusteringResult([]);
+      const keywords = keywordClusteringInput
+        .split('\n')
+        .map((k) => k.trim())
+        .filter(Boolean);
+
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords/cluster`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ keywords }),
+      });
+
+      if (res.ok) {
+        const clusters = await res.json();
+        setKeywordClusteringResult(clusters);
+      } else {
+        alert('Failed to cluster keywords');
+      }
+    } catch (err) {
+      console.error('Error in keyword clustering:', err);
+    } finally {
+      setIsClusteringKeywords(false);
+    }
+  }
+
+  async function handleFetchCompetitorGap() {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      setIsLoadingCompetitorGap(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/competitors/gap`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCompetitorGapResult(data);
+      } else {
+        alert('Failed to fetch competitor gap analysis');
+      }
+    } catch (err) {
+      console.error('Error fetching competitor gap:', err);
+    } finally {
+      setIsLoadingCompetitorGap(false);
+    }
+  }
+
+  async function handleCreateTopicFromCluster(clusterName: string, keywordsList: string[]) {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/topics`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          name: clusterName,
+          keywords: keywordsList,
+        }),
+      });
+
+      if (res.ok) {
+        alert(`Successfully established topic hub for "${clusterName}"!`);
+        fetchTopics();
+      } else {
+        alert('Failed to create topic hub');
+      }
+    } catch (err) {
+      console.error('Error creating topic from cluster:', err);
+    }
+  }
+
+  async function handleTrackKeywordDirectly(keyword: string) {
+    if (!token || !workspaceId || !projectId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          keyword: keyword.trim().toLowerCase(),
+        }),
+      });
+      if (res.ok) {
+        alert(`Successfully tracking keyword: "${keyword}"!`);
+        fetchKeywords();
+      } else {
+        const errorData = await res.json();
+        alert(`Failed to add keyword: ${errorData.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error tracking keyword:', err);
+    }
+  }
+
   function getStatusBadgeStyle(status: string) {
     switch (status) {
       case 'published':
@@ -1220,6 +1604,13 @@ export default function Page() {
                 <span>Topical Authority Map</span>
               </button>
               <button
+                onClick={() => setContentSubTab('research')}
+                style={{ ...styles.subTabButton, ...(contentSubTab === 'research' ? styles.subTabButtonActive : {}) }}
+              >
+                <Search size={16} />
+                <span>Keyword Research</span>
+              </button>
+              <button
                 onClick={() => setContentSubTab('editor')}
                 style={{ ...styles.subTabButton, ...(contentSubTab === 'editor' ? styles.subTabButtonActive : {}) }}
               >
@@ -1234,7 +1625,72 @@ export default function Page() {
                 {/* Plans List */}
                 <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div className="glass-card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ ...styles.cardTitle, marginBottom: '1.25rem' }}>Scheduled Content Drafts</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                      <h3 style={{ ...styles.cardTitle, marginBottom: 0 }}>Scheduled Content Drafts</h3>
+                      <button
+                        onClick={() => {
+                          setImportUrlStr('');
+                          setImportKeyword('');
+                          setImportTopicId('');
+                          setShowImportModal(true);
+                        }}
+                        style={{
+                          padding: '0.4rem 0.8rem',
+                          background: 'linear-gradient(135deg, var(--accent-secondary), #06b6d4)',
+                          border: 'none',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          boxShadow: '0 4px 12px rgba(6,182,212,0.15)',
+                        }}
+                      >
+                        <Plus size={14} />
+                        <span>Import URL</span>
+                      </button>
+                    </div>
+
+                    {/* Decayed Content Alert Section */}
+                    {decayedPlansList.length > 0 && (
+                      <div style={{ padding: '1rem', border: '1px solid rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.03)', display: 'flex', flexDirection: 'column', gap: '0.75rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ color: 'var(--accent-red)', fontWeight: 'bold', fontSize: '0.95rem' }}>⚠️ Content Decay Alert</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>The following published articles have dropped &gt;20% in traffic over the last 30 days:</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                          {decayedPlansList.map(plan => (
+                            <div key={plan.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '6px' }}>
+                              <div>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{plan.title}</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                  Keyword: <span style={{ color: 'var(--accent-primary)' }}>{plan.primaryKeyword}</span> | Drop: <span style={{ color: 'var(--accent-red)', fontWeight: 600 }}>-{plan.dropPercentage}%</span> (Recent clicks: {plan.recentClicks} vs Historic clicks: {plan.historicClicks})
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleRefreshContent(plan.id)}
+                                style={{
+                                  padding: '0.35rem 0.7rem',
+                                  backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                                  border: '1px solid var(--accent-primary)',
+                                  borderRadius: '6px',
+                                  color: 'var(--accent-primary)',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Refresh Content
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {contentPlansList.length === 0 ? (
                       <div style={styles.emptyState}>
                         <p>No content plans found. Create a new plan on the right to start your SEO strategy!</p>
@@ -1449,6 +1905,495 @@ export default function Page() {
               </div>
             )}
 
+            {/* Sub-tab 2.5: Keyword Research & Clustering */}
+            {contentSubTab === 'research' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+                {/* Switcher for Research Sub-tabs */}
+                <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.75rem' }}>
+                  <button
+                    onClick={() => setResearchSubTab('single')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: researchSubTab === 'single' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                      fontWeight: researchSubTab === 'single' ? 600 : 500,
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      paddingBottom: '0.25rem',
+                      borderBottom: researchSubTab === 'single' ? '2px solid var(--accent-primary)' : 'none'
+                    }}
+                  >
+                    <Search size={14} />
+                    <span>Keyword Research (Single)</span>
+                  </button>
+                  <button
+                    onClick={() => setResearchSubTab('clustering')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: researchSubTab === 'clustering' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                      fontWeight: researchSubTab === 'clustering' ? 600 : 500,
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      paddingBottom: '0.25rem',
+                      borderBottom: researchSubTab === 'clustering' ? '2px solid var(--accent-primary)' : 'none'
+                    }}
+                  >
+                    <Sparkles size={14} />
+                    <span>Keyword Clustering (Bulk)</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setResearchSubTab('gap');
+                      handleFetchCompetitorGap();
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: researchSubTab === 'gap' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                      fontWeight: researchSubTab === 'gap' ? 600 : 500,
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      paddingBottom: '0.25rem',
+                      borderBottom: researchSubTab === 'gap' ? '2px solid var(--accent-primary)' : 'none'
+                    }}
+                  >
+                    <TrendingUp size={14} />
+                    <span>Competitor Gap Analysis</span>
+                  </button>
+                </div>
+
+                {/* Sub-tab A: Keyword Research (Single) */}
+                {researchSubTab === 'single' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Keyword Research (Keyword Universe)</h3>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+                        Search for a target search query to check its estimated search volume, CPC, intent classification, and SERP positions.
+                      </p>
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={keywordResearchInput}
+                          onChange={e => setKeywordResearchInput(e.target.value)}
+                          placeholder="Enter keyword (e.g. ai writing tools, best cloud storage)..."
+                          style={{ ...styles.formInput, flex: 1, margin: 0 }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleResearchKeyword();
+                          }}
+                        />
+                        <button
+                          onClick={handleResearchKeyword}
+                          disabled={isResearchingKeyword}
+                          style={{
+                            background: 'var(--accent-primary)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.6rem 1.5rem',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          {isResearchingKeyword ? (
+                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                          ) : (
+                            <Search size={16} />
+                          )}
+                          <span>Research</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {keywordResearchResult && (
+                      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', alignItems: 'start' }}>
+                        {/* Keyword Metrics */}
+                        <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Metrics for "{keywordResearchResult.keyword}"</h4>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Search Volume</span>
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                                {keywordResearchResult.searchVolume?.toLocaleString() || '0'} /mo
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>CPC (USD)</span>
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>
+                                ${keywordResearchResult.cpc?.toFixed(2) || '0.00'}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Search Intent</span>
+                              <span style={{
+                                fontSize: '0.75rem',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontWeight: 600,
+                                textTransform: 'capitalize',
+                                background:
+                                  keywordResearchResult.intent === 'transactional'
+                                    ? 'rgba(16, 185, 129, 0.15)'
+                                    : keywordResearchResult.intent === 'commercial'
+                                    ? 'rgba(168, 85, 247, 0.15)'
+                                    : keywordResearchResult.intent === 'navigational'
+                                    ? 'rgba(245, 158, 11, 0.15)'
+                                    : 'rgba(59, 130, 246, 0.15)',
+                                color:
+                                  keywordResearchResult.intent === 'transactional'
+                                    ? 'var(--accent-green)'
+                                    : keywordResearchResult.intent === 'commercial'
+                                    ? 'var(--accent-secondary)'
+                                    : keywordResearchResult.intent === 'navigational'
+                                    ? 'var(--accent-orange)'
+                                    : 'var(--accent-primary)'
+                              }}>
+                                {keywordResearchResult.intent || 'Informational'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.5rem' }}>
+                            <button
+                              onClick={() => handleTrackKeywordDirectly(keywordResearchResult.keyword)}
+                              style={{
+                                background: 'rgba(255,255,255,0.05)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '0.5rem',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '0.85rem',
+                                width: '100%'
+                              }}
+                            >
+                              Track in Rank Tracker
+                            </button>
+                            <button
+                              onClick={() => {
+                                setContentSubTab('calendar');
+                                setNewPlanTitle(`Guide to ${keywordResearchResult.keyword.charAt(0).toUpperCase() + keywordResearchResult.keyword.slice(1)}`);
+                                setNewPlanPrimaryKeyword(keywordResearchResult.keyword);
+                              }}
+                              style={{
+                                background: 'var(--accent-primary)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: 'var(--radius-sm)',
+                                padding: '0.5rem',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '0.85rem',
+                                width: '100%'
+                              }}
+                            >
+                              Create Content Plan
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* SERP Results */}
+                        <div className="glass-card" style={{ padding: '1.5rem' }}>
+                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem', marginBottom: '1rem' }}>Top 10 Google SERP Results</h4>
+                          
+                          {(!keywordResearchResult.results || keywordResearchResult.results.length === 0) ? (
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontStyle: 'italic' }}>No SERP records returned.</p>
+                          ) : (
+                            <div style={styles.tableWrapper}>
+                              <table style={styles.table}>
+                                <thead>
+                                  <tr style={styles.trHead}>
+                                    <th style={{ ...styles.th, width: '60px', textAlign: 'center' }}>Rank</th>
+                                    <th style={{ ...styles.th, textAlign: 'left' }}>Page Details</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {keywordResearchResult.results.map((r: any) => (
+                                    <tr key={r.rank} style={styles.trBody}>
+                                      <td style={{ ...styles.td, textAlign: 'center', fontWeight: 600, color: 'var(--accent-primary)' }}>
+                                        #{r.rank}
+                                      </td>
+                                      <td style={{ ...styles.td, textAlign: 'left' }}>
+                                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{r.title}</div>
+                                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-secondary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', marginTop: '0.2rem' }}>
+                                          <span>{r.url}</span>
+                                          <ExternalLink size={10} />
+                                        </a>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sub-tab B: Keyword Clustering */}
+                {researchSubTab === 'clustering' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Keyword Clustering (Hub Builder)</h3>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+                        Input multiple search terms (one per line) to group them into clusters based on SERP overlap. Establish these groups directly as topical hubs.
+                      </p>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <textarea
+                          rows={6}
+                          value={keywordClusteringInput}
+                          onChange={e => setKeywordClusteringInput(e.target.value)}
+                          placeholder="Enter keywords here (e.g.&#13;ai writing tools&#13;best ai copywriter&#13;local seo tips&#13;google ranking guide)..."
+                          style={{
+                            ...styles.formInput,
+                            width: '100%',
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                            resize: 'vertical'
+                          }}
+                        />
+                        <button
+                          onClick={handleClusterKeywords}
+                          disabled={isClusteringKeywords}
+                          style={{
+                            background: 'var(--accent-primary)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.6rem 1.5rem',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.5rem',
+                            alignSelf: 'flex-start'
+                          }}
+                        >
+                          {isClusteringKeywords ? (
+                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                          ) : (
+                            <Sparkles size={16} />
+                          )}
+                          <span>Cluster Keywords</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {keywordClusteringResult.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                        <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Clustered Topic Suggestions</h4>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
+                          {keywordClusteringResult.map((cluster: any, idx: number) => (
+                            <div key={idx} className="glass-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                                  <h5 style={{ ...styles.cardTitle, fontSize: '0.95rem', margin: 0 }}>
+                                    Cluster: {cluster.name}
+                                  </h5>
+                                  <span style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.15rem 0.4rem',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    textTransform: 'capitalize',
+                                    background: 'rgba(168, 85, 247, 0.15)',
+                                    color: 'var(--accent-secondary)'
+                                  }}>
+                                    {cluster.intent || 'Commercial'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1rem' }}>
+                                  {cluster.keywords?.map((kw: string, kwIdx: number) => (
+                                    <span key={kwIdx} style={{
+                                      fontSize: '0.75rem',
+                                      padding: '0.15rem 0.4rem',
+                                      background: 'rgba(255,255,255,0.04)',
+                                      border: '1px solid rgba(255,255,255,0.08)',
+                                      borderRadius: '4px',
+                                      color: 'var(--text-primary)'
+                                    }}>
+                                      {kw}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto' }}>
+                                <button
+                                  onClick={() => handleCreateTopicFromCluster(cluster.name, cluster.keywords)}
+                                  style={{
+                                    flex: 1,
+                                    background: 'rgba(99, 102, 241, 0.15)',
+                                    color: 'var(--accent-primary)',
+                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    padding: '0.4rem 0.75rem',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem'
+                                  }}
+                                >
+                                  Establish Topic Hub
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sub-tab C: Competitor Content Gap */}
+                {researchSubTab === 'gap' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                        <div>
+                          <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Competitor Content Gap Analysis</h3>
+                          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                            Find keywords where your competitors rank in the top 10 positions, but your project is ranking poorly (&gt; 10) or not ranking at all.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleFetchCompetitorGap}
+                          disabled={isLoadingCompetitorGap}
+                          style={{
+                            background: 'var(--accent-primary)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '0.6rem 1.5rem',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          {isLoadingCompetitorGap ? (
+                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                          ) : (
+                            <RefreshCw size={16} />
+                          )}
+                          <span>Run Analysis</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <h4 style={{ ...styles.cardTitle, fontSize: '1rem', marginBottom: '1.25rem' }}>Content Gap Opportunities</h4>
+                      
+                      {isLoadingCompetitorGap ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
+                          <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                        </div>
+                      ) : competitorGapResult.length === 0 ? (
+                        <div style={styles.emptyState}>
+                          <p>No content gaps detected. Click "Run Analysis" to query competitor data from ClickHouse.</p>
+                        </div>
+                      ) : (
+                        <div style={styles.tableWrapper}>
+                          <table style={styles.table}>
+                            <thead>
+                              <tr style={styles.trHead}>
+                                <th style={{ ...styles.th, textAlign: 'left' }}>Target Keyword</th>
+                                <th style={{ ...styles.th, textAlign: 'left' }}>Competitor Domain</th>
+                                <th style={{ ...styles.th, textAlign: 'center' }}>Competitor Rank</th>
+                                <th style={{ ...styles.th, textAlign: 'center' }}>Our Rank</th>
+                                <th style={{ ...styles.th, textAlign: 'center' }}>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {competitorGapResult.map((item: any, idx: number) => (
+                                <tr key={idx} style={styles.trBody}>
+                                  <td style={{ ...styles.tdKeyword, textAlign: 'left' }}>{item.keyword}</td>
+                                  <td style={{ ...styles.td, textAlign: 'left', color: 'var(--text-secondary)' }}>{item.competitorDomain}</td>
+                                  <td style={{ ...styles.td, textAlign: 'center' }}>
+                                    <span style={{
+                                      background: 'rgba(245, 158, 11, 0.12)',
+                                      color: 'var(--accent-orange)',
+                                      fontWeight: 600,
+                                      padding: '0.15rem 0.4rem',
+                                      borderRadius: '4px',
+                                      fontSize: '0.8rem'
+                                    }}>
+                                      #{item.competitorRank}
+                                    </span>
+                                  </td>
+                                  <td style={{ ...styles.td, textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    {item.ownRank ? `#${item.ownRank}` : 'Unranked'}
+                                  </td>
+                                  <td style={{ ...styles.td, textAlign: 'center' }}>
+                                    <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
+                                      <button
+                                        onClick={() => handleTrackKeywordDirectly(item.keyword)}
+                                        style={{
+                                          background: 'rgba(255,255,255,0.04)',
+                                          border: '1px solid rgba(255,255,255,0.08)',
+                                          color: 'var(--text-primary)',
+                                          borderRadius: 'var(--radius-sm)',
+                                          padding: '0.3rem 0.6rem',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 500,
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        Track
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setContentSubTab('calendar');
+                                          setNewPlanTitle(`Guide to ${item.keyword.charAt(0).toUpperCase() + item.keyword.slice(1)}`);
+                                          setNewPlanPrimaryKeyword(item.keyword);
+                                        }}
+                                        style={{
+                                          background: 'var(--accent-primary)',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: 'var(--radius-sm)',
+                                          padding: '0.3rem 0.6rem',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 600,
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        Plan Article
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Sub-tab 3: AI SEO Editor & Real-time Optimizer */}
             {contentSubTab === 'editor' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
@@ -1479,18 +2424,158 @@ export default function Page() {
                   // Workspace is Active
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     {/* Back header bar */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <button
-                        onClick={() => setSelectedPlanId(null)}
-                        style={{ ...styles.openEditorBtn, background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}
-                      >
-                        <ArrowLeft size={14} />
-                        <span>Select different draft</span>
-                      </button>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        Target: <strong style={{ color: 'var(--text-primary)' }}>{contentPlansList.find(p => p.id === selectedPlanId)?.primaryKeyword}</strong>
-                      </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <button
+                          onClick={() => setSelectedPlanId(null)}
+                          style={{ ...styles.openEditorBtn, background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}
+                        >
+                          <ArrowLeft size={14} />
+                          <span>Select different draft</span>
+                        </button>
+                        <h3 style={{ ...styles.cardTitle, margin: 0 }}>{currentPlan?.title}</h3>
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {currentPlan?.status === 'published' ? (
+                          <>
+                            {currentPlan.publishUrl && (
+                              <a
+                                href={currentPlan.publishUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  fontSize: '0.8rem',
+                                  color: 'var(--accent-green)',
+                                  textDecoration: 'none',
+                                  background: 'rgba(16,185,129,0.1)',
+                                  padding: '0.4rem 0.8rem',
+                                  borderRadius: '6px',
+                                  fontWeight: 600,
+                                  border: '1px solid rgba(16,185,129,0.2)',
+                                }}
+                              >
+                                <Globe size={14} />
+                                <span>Live URL</span>
+                              </a>
+                            )}
+                            <button
+                              onClick={() => handleRefreshContent(currentPlan.id)}
+                              style={{
+                                padding: '0.4rem 0.8rem',
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                borderRadius: '6px',
+                                color: 'var(--accent-red)',
+                                fontSize: '0.8rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                              }}
+                            >
+                              <RefreshCw size={14} />
+                              <span>Re-optimize</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (currentPlan) {
+                                setPublishingPlanId(currentPlan.id);
+                                setPublishUrlStr('');
+                                setShowPublishModal(true);
+                              }
+                            }}
+                            style={{
+                              padding: '0.4rem 0.8rem',
+                              background: 'linear-gradient(135deg, var(--accent-secondary), #06b6d4)',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              boxShadow: '0 4px 12px rgba(6,182,212,0.15)',
+                            }}
+                          >
+                            <Globe size={14} />
+                            <span>Publish Live</span>
+                          </button>
+                        )}
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                          Target: <strong style={{ color: 'var(--text-primary)' }}>{currentPlan?.primaryKeyword}</strong>
+                        </span>
+                      </div>
                     </div>
+
+                    {/* ClickHouse GSC Performance Stats Card Dashboard */}
+                    {currentPlan?.status === 'published' && (
+                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', width: '100%' }}>
+                        {/* Clicks */}
+                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>30d Clicks (GSC)</span>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {performanceData?.recent?.clicks ?? 0}
+                            </span>
+                            {performanceData?.hasData && (
+                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: (performanceData.recent.clicks >= performanceData.historic.clicks) ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                                {performanceData.recent.clicks >= performanceData.historic.clicks ? '▲' : '▼'}{' '}
+                                {Math.abs(performanceData.recent.clicks - performanceData.historic.clicks)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Impressions */}
+                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>30d Impressions</span>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {performanceData?.recent?.impressions ?? 0}
+                            </span>
+                            {performanceData?.hasData && (
+                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: (performanceData.recent.impressions >= performanceData.historic.impressions) ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                                {performanceData.recent.impressions >= performanceData.historic.impressions ? '▲' : '▼'}{' '}
+                                {Math.abs(performanceData.recent.impressions - performanceData.historic.impressions)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* CTR */}
+                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Average CTR</span>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {performanceData?.recent?.ctr ? `${(performanceData.recent.ctr * 100).toFixed(2)}%` : '0.00%'}
+                          </div>
+                        </div>
+
+                        {/* Position */}
+                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Average Position</span>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            {performanceData?.recent?.position ? performanceData.recent.position.toFixed(1) : '0.0'}
+                          </div>
+                        </div>
+
+                        {/* Primary Rank */}
+                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Keyword Rank</span>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--accent-primary)' }}>
+                            {performanceData?.primaryKeywordRank ? `#${performanceData.primaryKeywordRank}` : 'Not Ranked'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Active work deck */}
                     <div style={styles.editorWorkspaceGrid}>
@@ -1701,6 +2786,43 @@ export default function Page() {
                                 })}
                               </div>
                             )}
+
+                            {/* Internal Link Suggestions */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                              <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Link2 size={12} color="var(--accent-primary)" />
+                                <span>Internal Link Builder</span>
+                              </h4>
+                              <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
+                                Improve topical authority by linking to these relevant published pages:
+                              </p>
+                              {getInternalLinkSuggestions().length === 0 ? (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                  No published pages in this topic hub yet.
+                                </span>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                  {getInternalLinkSuggestions().map((link, idx) => (
+                                    <div key={idx} style={{ padding: '0.5rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.04)', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }} title={link.title}>
+                                          {link.title}
+                                        </span>
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--accent-secondary)', background: 'rgba(6,182,212,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontWeight: 600 }}>
+                                          {link.reason}
+                                        </span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Anchor: "{link.keyword}"</span>
+                                        <a href={link.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600 }}>
+                                          Copy Link
+                                        </a>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>

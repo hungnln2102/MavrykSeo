@@ -3,6 +3,7 @@ import { db, keywords, projects } from '@seo/db';
 import { clickhouse } from '@seo/clickhouse';
 import { eq, and } from 'drizzle-orm';
 import { Queue } from 'bullmq';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class KeywordsService {
@@ -10,8 +11,8 @@ export class KeywordsService {
   private collectorApiUrl: string;
   private aiServiceUrl: string;
 
-  constructor() {
-    const isMock = process.env.CLICKHOUSE_MOCK === 'true';
+  constructor(private readonly metricsService: MetricsService) {
+    const isMock = process.env.CLICKHOUSE_MOCK !== 'false';
     if (!isMock) {
       const redisHost = process.env.REDIS_HOST || 'localhost';
       const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
@@ -203,15 +204,29 @@ export class KeywordsService {
     // 2. Call FastAPI AI to get Search Intent
     let intent = 'informational';
     try {
+      const payload = { keywords: [kwLower] };
       const response = await fetch(`${this.aiServiceUrl}/analyze/intent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: [kwLower] }),
+        body: JSON.stringify(payload),
       });
       if (response.ok) {
         const intentData = await response.json();
         if (intentData.success && intentData.intents?.length > 0) {
           intent = intentData.intents[0].intent;
+          
+          try {
+            const promptStr = JSON.stringify(payload);
+            const responseStr = JSON.stringify(intentData);
+            const promptTokens = Math.ceil(promptStr.length / 4);
+            const completionTokens = Math.ceil(responseStr.length / 4);
+            const estimatedCostUsd = (promptTokens * 0.00000015) + (completionTokens * 0.00000060);
+            const model = process.env.AI_MODEL || 'gemini-1.5-flash';
+            this.metricsService.recordAiUsage(model, 'prompt', promptTokens, 0);
+            this.metricsService.recordAiUsage(model, 'completion', completionTokens, estimatedCostUsd);
+          } catch (e) {
+            console.error('Failed to record AI intent metrics:', e.message);
+          }
         }
       }
     } catch (err) {
@@ -259,10 +274,11 @@ export class KeywordsService {
 
     // 2. Send to FastAPI AI for clustering
     try {
+      const payload = { keywords: serpResults };
       const response = await fetch(`${this.aiServiceUrl}/keywords/cluster`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: serpResults }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -271,6 +287,18 @@ export class KeywordsService {
 
       const clusterData = await response.json();
       if (clusterData.success) {
+        try {
+          const promptStr = JSON.stringify(payload);
+          const responseStr = JSON.stringify(clusterData);
+          const promptTokens = Math.ceil(promptStr.length / 4);
+          const completionTokens = Math.ceil(responseStr.length / 4);
+          const estimatedCostUsd = (promptTokens * 0.00000015) + (completionTokens * 0.00000060);
+          const model = process.env.AI_MODEL || 'gemini-1.5-flash';
+          this.metricsService.recordAiUsage(model, 'prompt', promptTokens, 0);
+          this.metricsService.recordAiUsage(model, 'completion', completionTokens, estimatedCostUsd);
+        } catch (e) {
+          console.error('Failed to record AI cluster metrics:', e.message);
+        }
         return clusterData.clusters;
       }
     } catch (err) {

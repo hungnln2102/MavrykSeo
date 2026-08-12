@@ -5,6 +5,7 @@ import { TenantGuard } from '../tenancy/tenant.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
+import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('sites')
 @UseGuards(AuthGuard, TenantGuard)
@@ -14,6 +15,7 @@ export class SitesController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @AuditLog('site.create', 'site')
   async createSite(
     @CurrentWorkspace() workspaceId: string,
     @Body() body: { projectId: string; domain: string }

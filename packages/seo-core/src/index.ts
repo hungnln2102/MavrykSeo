@@ -47,3 +47,5 @@ export const CanonicalEvents = {
 } as const;
 
 export type CanonicalEvent = typeof CanonicalEvents[keyof typeof CanonicalEvents];
+
+export * from './crypto.js';

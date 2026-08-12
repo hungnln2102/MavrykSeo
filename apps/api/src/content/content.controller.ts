@@ -83,9 +83,55 @@ export class ContentController {
       dueDate?: string | null;
       body?: string;
       assigneeId?: string | null;
+      publishUrl?: string | null;
     },
   ) {
     return this.contentService.updateContentPlan(workspaceId, projectId, id, body);
+  }
+
+  @Post('content-plans/import-url')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async importUrl(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('projectId') projectId: string,
+    @Body() body: { url: string; primaryKeyword: string; topicId?: string },
+  ) {
+    return this.contentService.importUrl(
+      workspaceId,
+      projectId,
+      body.url,
+      body.primaryKeyword,
+      body.topicId,
+    );
+  }
+
+  @Get('content-plans/decayed')
+  async getDecayedContentPlans(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.contentService.getDecayedContentPlans(workspaceId, projectId);
+  }
+
+  @Get('content-plans/:id/performance')
+  async getContentPlanPerformance(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.contentService.getContentPlanPerformance(workspaceId, projectId, id);
+  }
+
+  @Post('content-plans/:id/refresh')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async refreshContentPlan(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    return this.contentService.refreshContentPlan(workspaceId, projectId, id);
   }
 
   // --- AI Briefs ---

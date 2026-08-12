@@ -171,7 +171,7 @@ class MockClickHouseClient {
   }
 }
 
-export const clickhouse = process.env.CLICKHOUSE_MOCK === 'true'
+export const clickhouse = process.env.CLICKHOUSE_MOCK !== 'false'
   ? (new MockClickHouseClient() as any)
   : rawClickhouseClient;
 

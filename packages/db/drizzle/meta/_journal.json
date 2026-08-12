@@ -29,6 +29,13 @@
       "when": 1786517827921,
       "tag": "0003_melodic_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786551722933,
+      "tag": "0004_normal_polaris",
+      "breakpoints": true
     }
   ]
 }

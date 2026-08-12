@@ -2,9 +2,13 @@
   "name": "@seo/core",
   "version": "1.0.0",
   "private": true,
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
   "devDependencies": {
+    "@types/node": "^20.3.1",
     "typescript": "^5.5.4"
   }
 }

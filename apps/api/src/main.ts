@@ -19,8 +19,10 @@ if (process.env.SENTRY_DSN) {
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter()
+    new FastifyAdapter({ trustProxy: true })
   );
+
+  app.enableShutdownHooks();
 
   app.enableCors({
     origin: '*',

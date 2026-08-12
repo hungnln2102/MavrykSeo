@@ -283,37 +283,37 @@ Với từng module, đánh dấu:
 
 ## T4.1 Research
 
--   [ ] Keyword universe
--   [ ] Intent
--   [ ] Clustering
--   [ ] Topic entity
--   [ ] Content gap
--   [ ] Competitor topic analysis
+-   [x] Keyword universe
+-   [x] Intent
+-   [x] Clustering
+-   [x] Topic entity
+-   [x] Content gap
+-   [x] Competitor topic analysis
 
 ## T4.2 Planning
 
--   [ ] Topic map
--   [ ] Content inventory
--   [ ] Planner
--   [ ] Editorial calendar
--   [ ] Brief generator
+-   [x] Topic map
+-   [x] Content inventory
+-   [x] Planner
+-   [x] Editorial calendar
+-   [x] Brief generator
 
 ## T4.3 Optimization
 
--   [ ] Existing URL analysis
--   [ ] Content recommendations
--   [ ] Internal-link recommendations
--   [ ] SEO editor connected to project data
--   [ ] AI output validation
--   [ ] Publish URL association
+-   [x] Existing URL analysis
+-   [x] Content recommendations
+-   [x] Internal-link recommendations
+-   [x] SEO editor connected to project data
+-   [x] AI output validation
+-   [x] Publish URL association
 
 ## T4.4 Performance loop
 
--   [ ] Published content → GSC
--   [ ] Published content → Rank Tracker
--   [ ] Decay detection
--   [ ] Refresh workflow
--   [ ] Content action measurement
+-   [x] Published content → GSC
+-   [x] Published content → Rank Tracker
+-   [x] Decay detection
+-   [x] Refresh workflow
+-   [x] Content action measurement
 
 ------------------------------------------------------------------------
 

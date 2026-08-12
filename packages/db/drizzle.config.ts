@@ -5,6 +5,6 @@ export default defineConfig({
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgresql://seo:seo@127.0.0.1:5435/seo_platform',
+    url: process.env.DATABASE_URL || 'postgresql://admin:ZAQ!xsw21122@127.0.0.1:5432/seo_platform',
   },
 });

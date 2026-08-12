@@ -40,7 +40,7 @@ try {
   // ignore
 }
 
-const connectionString = process.env.DATABASE_URL || 'postgres://seo:seo@localhost:5435/seo_platform';
+const connectionString = process.env.DATABASE_URL || 'postgresql://admin:ZAQ!xsw21122@localhost:5432/seo_platform';
 export const client = postgres(connectionString);
 export const db = drizzle(client, { schema });
 export { sql } from 'drizzle-orm';

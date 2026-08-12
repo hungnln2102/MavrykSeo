@@ -6,6 +6,7 @@ import { clickhouse } from '@seo/clickhouse';
 import { db, sites } from '@seo/db';
 import { eq } from 'drizzle-orm';
 import axios from 'axios';
+import { crawlSuccessCounter } from './metrics';
 
 interface CrawlJobData {
   siteId: string;
@@ -87,6 +88,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
       crawlResult = response.data;
     } catch (error) {
       console.error(`Go crawler API request failed for URL ${url}:`, error.message);
+      crawlSuccessCounter.inc({ status: 'failed', reason: 'api_request_failed' });
       throw new Error(`Go Crawler API failed: ${error.message}`);
     }
 
@@ -117,6 +119,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
             format: 'JSONEachRow',
           });
           console.log(`Recorded redirect loop observation in ClickHouse for site: ${siteId}`);
+          crawlSuccessCounter.inc({ status: 'failed', reason: 'redirect_loop' });
           return;
         } catch (dbErr) {
           console.error(`Failed to insert redirect loop to ClickHouse:`, dbErr.message);
@@ -146,11 +149,13 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
             format: 'JSONEachRow',
           });
           console.log(`Recorded robots.txt block observation in ClickHouse for site: ${siteId}`);
+          crawlSuccessCounter.inc({ status: 'failed', reason: 'robots_blocked' });
           return;
         } catch (dbErr) {
           console.error(`Failed to insert robots.txt block to ClickHouse:`, dbErr.message);
         }
       }
+      crawlSuccessCounter.inc({ status: 'failed', reason: crawlResult.error || 'unknown_crawler_error' });
       throw new Error(`Go Crawler returned failure: ${crawlResult.error}`);
     }
 
@@ -273,6 +278,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
         .set({ updatedAt: new Date() })
         .where(eq(sites.id, siteId));
       console.log(`Updated Postgres site record for ID: ${siteId}`);
+      crawlSuccessCounter.inc({ status: 'success' });
     } catch (error) {
       console.error(`Failed to update PostgreSQL site record:`, error.message);
     }

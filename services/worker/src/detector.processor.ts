@@ -3,6 +3,7 @@ import { Worker, Job } from 'bullmq';
 import { db, sites, recommendations } from '@seo/db';
 import { eq } from 'drizzle-orm';
 import axios from 'axios';
+import { aiTokensCounter, aiCostUsdCounter } from './metrics';
 
 import { ContentDecayDetector } from './detectors/content-decay.detector';
 import { CtrOpportunityDetector } from './detectors/ctr-opportunity.detector';
@@ -166,6 +167,23 @@ export class DetectorProcessor implements OnModuleInit, OnModuleDestroy {
 
     if (!aiResponse.success || !aiResponse.recommendations) {
       throw new Error('FastAPI AI service returned failure status or missing recommendations');
+    }
+
+    // Record AI cost metrics
+    try {
+      const promptString = JSON.stringify(aggregatedSignals);
+      const responseString = JSON.stringify(aiResponse);
+      const promptTokens = Math.ceil(promptString.length / 4);
+      const completionTokens = Math.ceil(responseString.length / 4);
+      const estimatedCostUsd = (promptTokens * 0.00000015) + (completionTokens * 0.00000060);
+      
+      const model = process.env.AI_MODEL || 'gemini-1.5-flash';
+      aiTokensCounter.inc({ model, type: 'prompt' }, promptTokens);
+      aiTokensCounter.inc({ model, type: 'completion' }, completionTokens);
+      aiCostUsdCounter.inc({ model }, estimatedCostUsd);
+      console.log(`Recorded AI recommendation metrics. Prompt tokens: ${promptTokens}, Completion tokens: ${completionTokens}`);
+    } catch (metricErr) {
+      console.error('Failed to record AI recommendation metrics:', metricErr.message);
     }
 
     const recs = aiResponse.recommendations;

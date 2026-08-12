@@ -58,7 +58,8 @@ export async function initializeClickHouse() {
       load_time_ms UInt32,
       page_size_bytes UInt32,
       word_count UInt32,
-      issues Array(String)
+      issues Array(String),
+      canonical_url String
     ) ENGINE = MergeTree()
     ORDER BY (site_id, timestamp, url)`,
 
@@ -82,5 +83,16 @@ export async function initializeClickHouse() {
       console.error(`Error running query: ${query}`, error);
       throw error;
     }
+  }
+
+  // Schema migration for existing installations
+  try {
+    console.log(`Running ClickHouse schema migration for canonical_url...`);
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS canonical_url String`,
+    });
+    console.log('Successfully updated crawl_page_observations schema.');
+  } catch (error) {
+    console.warn(`ClickHouse migration warning: ${(error as any).message}`);
   }
 }

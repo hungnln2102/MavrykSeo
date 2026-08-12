@@ -97,7 +97,16 @@ limit/budget/kill switch.
 Task chỉ hoàn tất khi code, tests, docs, migrations, permissions và
 observability phù hợp đều hoàn thành.
 
-## 14. Nguyên tắc cuối
+## 14. Responsive rules
+
+Khi chỉnh sửa giao diện cần phải responsive cho các phiên bản:
+- Mobile
+- Tablet
+- PC
+- Max-PC (màn hình trên 27 inch)
+- Min-PC (màn hình dưới 24 inch)
+
+## 15. Nguyên tắc cuối
 
 Protect user data. Preserve history. Keep tenant isolation. Prefer
 measurable SEO actions. Minimize unnecessary complexity.

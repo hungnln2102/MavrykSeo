@@ -1,5 +1,6 @@
 import { clickhouse } from '@seo/clickhouse';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import * as crypto from 'crypto';
 
 export interface OrphanPageSignal {
   detector_type: 'orphan_page';
@@ -112,11 +113,23 @@ export class OrphanPageDetector {
   }
 
   private static async fetchHtmlFromS3(s3: S3Client, bucket: string, siteId: string, pageUrl: string): Promise<string> {
-    // In a real environment, we'd list the prefix `crawl/${siteId}/` and find the matching HTML object.
-    // For local dev validation, we can simulate or attempt to list & download.
-    // Let's list objects with prefix `crawl/${siteId}/` and download the content of the most recent one.
-    // To keep it simple and compile-ready:
-    throw new Error('S3 listing not implemented; falling back to simulated extraction');
+    const urlHash = crypto.createHash('sha256').update(pageUrl).digest('hex');
+    const key = `crawl/${siteId}/${urlHash}.html`;
+    const command = new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    });
+    const response = await s3.send(command);
+    const stream = response.Body as any;
+    if (!stream) {
+      return '';
+    }
+    return new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.on('error', (err: Error) => reject(err));
+      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    });
   }
 
   private static extractInternalLinks(html: string, domain: string): string[] {

@@ -15,6 +15,20 @@
       "when": 1786460908366,
       "tag": "0001_slimy_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786517463496,
+      "tag": "0002_rich_ravenous",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786517827921,
+      "tag": "0003_melodic_genesis",
+      "breakpoints": true
     }
   ]
 }

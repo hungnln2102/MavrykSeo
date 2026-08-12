@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import * as crypto from 'crypto';
 import { clickhouse } from '@seo/clickhouse';
 import { db, sites } from '@seo/db';
 import { eq } from 'drizzle-orm';
@@ -90,6 +91,66 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!crawlResult.success) {
+      const errStr = (crawlResult.error || '').toLowerCase();
+      if (errStr.includes('redirect') || errStr.includes('too many redirects') || errStr.includes('loop')) {
+        console.warn(`Redirect loop or issue detected for URL ${url}: ${crawlResult.error}`);
+        const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
+        const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        try {
+          await clickhouse.insert({
+            table: `${clickhouseDb}.crawl_page_observations`,
+            values: [
+              {
+                timestamp: timestampStr,
+                site_id: siteId,
+                url,
+                status_code: 310, // Standard loop code
+                title: '',
+                meta_description: '',
+                load_time_ms: 0,
+                page_size_bytes: 0,
+                word_count: 0,
+                issues: ['redirect_loop'],
+                canonical_url: '',
+              },
+            ],
+            format: 'JSONEachRow',
+          });
+          console.log(`Recorded redirect loop observation in ClickHouse for site: ${siteId}`);
+          return;
+        } catch (dbErr) {
+          console.error(`Failed to insert redirect loop to ClickHouse:`, dbErr.message);
+        }
+      } else if (errStr.includes('blocked by robots.txt')) {
+        console.warn(`Robots.txt block detected for URL ${url}: ${crawlResult.error}`);
+        const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
+        const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        try {
+          await clickhouse.insert({
+            table: `${clickhouseDb}.crawl_page_observations`,
+            values: [
+              {
+                timestamp: timestampStr,
+                site_id: siteId,
+                url,
+                status_code: 403,
+                title: '',
+                meta_description: '',
+                load_time_ms: 0,
+                page_size_bytes: 0,
+                word_count: 0,
+                issues: ['robots_blocked'],
+                canonical_url: '',
+              },
+            ],
+            format: 'JSONEachRow',
+          });
+          console.log(`Recorded robots.txt block observation in ClickHouse for site: ${siteId}`);
+          return;
+        } catch (dbErr) {
+          console.error(`Failed to insert robots.txt block to ClickHouse:`, dbErr.message);
+        }
+      }
       throw new Error(`Go Crawler returned failure: ${crawlResult.error}`);
     }
 
@@ -97,7 +158,8 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
 
     // 2. Upload raw HTML to MinIO S3
     const bucketName = process.env.S3_BUCKET_NAME || 'seo-platform-raw';
-    const s3Key = `crawl/${siteId}/${Date.now()}_index.html`;
+    const urlHash = crypto.createHash('sha256').update(url).digest('hex');
+    const s3Key = `crawl/${siteId}/${urlHash}.html`;
 
     try {
       await this.s3Client.send(
@@ -122,9 +184,61 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
     const issues: string[] = [];
     if (!crawlResult.title) issues.push('missing_title');
     if (!crawlResult.metaDescription) issues.push('missing_meta_description');
-    if (!crawlResult.canonicalUrl) issues.push('missing_canonical');
     if (crawlResult.statusCode >= 400) issues.push('error_status_code');
     if (crawlResult.wordCount < 200) issues.push('thin_content');
+
+    const robotsMeta = (crawlResult.robotsMeta || '').toLowerCase();
+    if (robotsMeta.includes('noindex')) {
+      issues.push('noindex');
+    }
+
+    let canonicalUrl = crawlResult.canonicalUrl || '';
+    if (!canonicalUrl) {
+      issues.push('missing_canonical');
+    } else {
+      try {
+        const pageUrlObj = new URL(url);
+        const siteDomain = pageUrlObj.hostname;
+        const siteProtocol = pageUrlObj.protocol;
+
+        let canonicalUrlObj: URL;
+        if (canonicalUrl.startsWith('/') || !canonicalUrl.includes('://')) {
+          canonicalUrl = new URL(canonicalUrl, url).href;
+          canonicalUrlObj = new URL(canonicalUrl);
+        } else {
+          canonicalUrlObj = new URL(canonicalUrl);
+        }
+
+        if (canonicalUrlObj.hostname !== siteDomain) {
+          issues.push('canonical_domain_mismatch');
+        }
+        if (siteProtocol === 'https:' && canonicalUrlObj.protocol === 'http:') {
+          issues.push('canonical_protocol_mismatch');
+        }
+      } catch (err) {
+        issues.push('canonical_invalid');
+      }
+    }
+
+    let finalStatusCode = crawlResult.statusCode;
+    if (crawlResult.redirectChain && crawlResult.redirectChain.length > 0) {
+      if (crawlResult.redirectStatusCodes && crawlResult.redirectStatusCodes.length > 0) {
+        finalStatusCode = crawlResult.redirectStatusCodes[0];
+      } else {
+        finalStatusCode = 301;
+      }
+
+      if (crawlResult.redirectChain.length > 2) {
+        issues.push('multiple_redirects');
+      }
+
+      const hasTemp = (crawlResult.redirectStatusCodes || []).some(
+        (code: number) => code === 302 || code === 307
+      );
+      if (hasTemp) {
+        issues.push('temporary_redirect');
+      }
+    }
 
     try {
       await clickhouse.insert({
@@ -134,13 +248,14 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
             timestamp: timestampStr,
             site_id: siteId,
             url,
-            status_code: crawlResult.statusCode,
+            status_code: finalStatusCode,
             title: crawlResult.title || '',
             meta_description: crawlResult.metaDescription || '',
             load_time_ms: crawlResult.loadTimeMs || 0,
             page_size_bytes: (crawlResult.rawHtml || '').length,
             word_count: crawlResult.wordCount || 0,
             issues,
+            canonical_url: canonicalUrl,
           },
         ],
         format: 'JSONEachRow',

@@ -6,3 +6,5 @@ allowBuilds:
   '@nestjs/core': true
   esbuild: true
   msgpackr-extract: true
+  '@sentry/node-cpu-profiler': true
+  protobufjs: true

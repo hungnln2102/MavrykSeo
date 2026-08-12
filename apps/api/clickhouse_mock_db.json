@@ -1,0 +1,49 @@
+{
+  "rank_observations": [
+    {
+      "timestamp": "2026-08-12 07:12:17",
+      "project_id": "13f8fb80-4f62-4882-a46d-a8e469cc3a8b",
+      "keyword": "seo analyzer",
+      "rank": 15,
+      "search_volume": 1200,
+      "url": "https://agency.mavryk.io/seo-analyzer",
+      "competitor_domain": ""
+    },
+    {
+      "timestamp": "2026-08-12 07:12:17",
+      "project_id": "13f8fb80-4f62-4882-a46d-a8e469cc3a8b",
+      "keyword": "seo analyzer",
+      "rank": 2,
+      "search_volume": 1200,
+      "url": "https://competitor1.com/seo-analyzer",
+      "competitor_domain": "competitor1.com"
+    },
+    {
+      "timestamp": "2026-08-12 07:12:17",
+      "project_id": "13f8fb80-4f62-4882-a46d-a8e469cc3a8b",
+      "keyword": "free rank tracker",
+      "rank": 2,
+      "search_volume": 450,
+      "url": "https://agency.mavryk.io/rank-tracker",
+      "competitor_domain": ""
+    },
+    {
+      "timestamp": "2026-08-12 07:12:17",
+      "project_id": "13f8fb80-4f62-4882-a46d-a8e469cc3a8b",
+      "keyword": "free rank tracker",
+      "rank": 8,
+      "search_volume": 450,
+      "url": "https://competitor2.com/rank-tracker",
+      "competitor_domain": "competitor2.com"
+    },
+    {
+      "timestamp": "2026-08-12 07:12:17",
+      "project_id": "13f8fb80-4f62-4882-a46d-a8e469cc3a8b",
+      "keyword": "best seo plugin",
+      "rank": 5,
+      "search_volume": 3200,
+      "url": "https://competitor1.com/best-seo-plugin",
+      "competitor_domain": "competitor1.com"
+    }
+  ]
+}

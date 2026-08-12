@@ -2,11 +2,223 @@ process.env.CLICKHOUSE_USER = process.env.CLICKHOUSE_USER || 'seo';
 process.env.CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD || 'seo';
 process.env.CLICKHOUSE_DB = process.env.CLICKHOUSE_DB || 'seo_platform';
 
-const { db, sites, projects, workspaces, users, recommendations } = require('@seo/db');
+const { db, sites, projects, workspaces, users, recommendations, memberships } = require('@seo/db');
 const { clickhouse } = require('@seo/clickhouse');
+const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const crypto = require('crypto');
+const Readable = require('stream').Readable;
+
+// Global S3 Mock
+S3Client.prototype.send = async function (command, options) {
+  if (command instanceof GetObjectCommand) {
+    const key = command.input.Key;
+    console.log(`[Mock S3 GetObject]: Key: ${key}`);
+    let html = '<html><body>Default content</body></html>';
+    
+    const hashAbout = crypto.createHash('sha256').update('https://agency.mavryk.io/about').digest('hex');
+    const hashTips = crypto.createHash('sha256').update('https://agency.mavryk.io/blog/seo-tips').digest('hex');
+    
+    if (key.includes(hashAbout)) {
+      html = '<html><body>About page. We have some great SEO tips here! Please read them.</body></html>';
+    } else if (key.includes(hashTips)) {
+      html = '<html><body>SEO Tips page. Deep content about SEO tips.</body></html>';
+    }
+    
+    const s = new Readable();
+    s.push(html);
+    s.push(null);
+    return {
+      Body: s
+    };
+  }
+  return { success: true };
+};
+
+// Mock ClickHouse client since Docker/ClickHouse is not installed locally
+const mockClickhouseData = {};
+
+clickhouse.command = async (params) => {
+  console.log(`[Mock ClickHouse Command]: ${params.query}`);
+  return { success: true };
+};
+
+clickhouse.insert = async (params) => {
+  console.log(`[Mock ClickHouse Insert]: Table "${params.table}" with ${params.values.length} rows`);
+  mockClickhouseData[params.table] = params.values;
+  return { success: true };
+};
+
+clickhouse.query = async (params) => {
+  console.log(`[Mock ClickHouse Query]: ${params.query}`);
+  const q = params.query.toLowerCase();
+  let rows = [];
+
+  if (q.includes('gsc_page_daily')) {
+    if (q.includes('sumif(clicks, date >= today() - 15)')) {
+      // WinningPageDetector query
+      rows = [
+        {
+          page: 'https://agency.mavryk.io/blog/winning-seo-tricks',
+          clicks_recent: 20,
+          clicks_historic: 5,
+          impressions_recent: 500,
+          impressions_historic: 100
+        }
+      ];
+    } else {
+      // Content Decay AND GSC traffic for Indexability
+      rows = [
+        {
+          page: 'https://agency.mavryk.io/blog/seo-tips',
+          clicks_recent: 5,
+          clicks_historic: 50,
+          total_clicks: 5,
+          total_impressions: 100
+        },
+        {
+          page: 'https://agency.mavryk.io/traffic-robots-blocked',
+          clicks_recent: 0,
+          clicks_historic: 0,
+          total_clicks: 12,
+          total_impressions: 240
+        },
+        {
+          page: 'https://agency.mavryk.io/traffic-noindex',
+          clicks_recent: 0,
+          clicks_historic: 0,
+          total_clicks: 8,
+          total_impressions: 150
+        }
+      ];
+    }
+  } else if (q.includes('gsc_query_daily')) {
+    // Striking Distance and CTR Opportunity
+    // We return both to satisfy both detectors
+    rows = [
+      {
+        query: 'local seo audit tool',
+        total_clicks: 0,
+        total_impressions: 450,
+        avg_position: 14.5
+      },
+      {
+        query: 'best enterprise seo agency',
+        total_clicks: 2,
+        total_impressions: 2000,
+        avg_position: 2.3
+      }
+    ];
+  } else if (q.includes('rank_observations')) {
+    if (q.includes('group by keyword, competitor_domain')) {
+      // CompetitorGainDetector query
+      rows = [
+        {
+          keyword: 'competitor keyword',
+          competitor_domain: '',
+          latest_rank: 15,
+          latest_url: 'https://agency.mavryk.io/competitor-kw-page',
+          earliest_rank: 15
+        },
+        {
+          keyword: 'competitor keyword',
+          competitor_domain: 'competitor.com',
+          latest_rank: 8,
+          latest_url: 'https://competitor.com/page',
+          earliest_rank: 20
+        }
+      ];
+    } else if (q.includes('latest_rank <= 20')) {
+      // InternalLinkOpportunityDetector query
+      rows = [
+        {
+          keyword: 'SEO tips',
+          target_url: 'https://agency.mavryk.io/blog/seo-tips',
+          latest_rank: 5
+        }
+      ];
+    } else if (q.includes('competitor_domain = \'\'') && q.includes('group by keyword')) {
+      // LostRankingDetector query
+      rows = [
+        {
+          keyword: 'lost keyword',
+          latest_rank: 18,
+          latest_url: 'https://agency.mavryk.io/lost-kw-page',
+          earliest_rank: 5
+        }
+      ];
+    } else {
+      // Cannibalization
+      rows = [{
+        keyword: 'competitor analysis strategy',
+        urls: ['https://agency.mavryk.io/blog/competitor-analysis-1', 'https://agency.mavryk.io/blog/competitor-analysis-2'],
+        url_count: 2
+      }];
+    }
+  } else if (q.includes('crawl_page_observations')) {
+    // Orphan Page, Title/Meta, Redirect, and Canonical Issues
+    const todayStr = new Date().toISOString().slice(0, 10);
+    rows = [
+      { url: 'https://agency.mavryk.io/', latest_title: 'Mavryk Agency - Best Enterprise SEO Platform', latest_meta_description: 'Mavryk is the leading enterprise agency and SEO platform for content optimization.', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/orphan-contacts', latest_title: 'Contacts Us', latest_meta_description: 'Short desc', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/orphan-contacts', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/about', latest_title: '', latest_meta_description: 'This is a duplicate description.', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/about', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/services', latest_title: 'Services', latest_meta_description: 'This is a duplicate description.', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/services', timestamp: todayStr },
+      
+      // Target for Internal Link Opportunity
+      { url: 'https://agency.mavryk.io/blog/seo-tips', latest_title: 'SEO Tips', latest_meta_description: 'Best tips', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/blog/seo-tips', timestamp: todayStr },
+      
+      // Redirects
+      { url: 'https://agency.mavryk.io/loop-redirect', latest_title: '', latest_meta_description: '', latest_status_code: 310, latest_issues: ['redirect_loop'], latest_canonical_url: '', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/chain-redirect', latest_title: '', latest_meta_description: '', latest_status_code: 301, latest_issues: ['multiple_redirects', 'temporary_redirect'], latest_canonical_url: '', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/temp-redirect', latest_title: '', latest_meta_description: '', latest_status_code: 302, latest_issues: ['temporary_redirect'], latest_canonical_url: '', timestamp: todayStr },
+      
+      // Canonical issues
+      { url: 'https://agency.mavryk.io/missing-canonical', latest_title: 'Missing Canonical Page', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: ['missing_canonical'], latest_canonical_url: '', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/mismatch-canonical', latest_title: 'Mismatch Canonical Page', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: ['canonical_domain_mismatch'], latest_canonical_url: 'https://otherdomain.com/mismatch-canonical', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/broken-canonical-source', latest_title: 'Broken Canonical Source', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/broken-canonical-target', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/broken-canonical-target', latest_title: 'Broken Canonical Target', latest_meta_description: 'Desc', latest_status_code: 404, latest_issues: ['error_status_code'], latest_canonical_url: 'https://agency.mavryk.io/broken-canonical-target', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/redirect-canonical-source', latest_title: 'Redirect Canonical Source', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/redirect-canonical-target', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/redirect-canonical-target', latest_title: 'Redirect Canonical Target', latest_meta_description: 'Desc', latest_status_code: 301, latest_issues: ['temporary_redirect'], latest_canonical_url: 'https://agency.mavryk.io/redirect-canonical-target', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/loop-canonical-a', latest_title: 'Loop Canonical A', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/loop-canonical-b', timestamp: todayStr },
+      { url: 'https://agency.mavryk.io/loop-canonical-b', latest_title: 'Loop Canonical B', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: [], latest_canonical_url: 'https://agency.mavryk.io/loop-canonical-a', timestamp: todayStr },
+      
+      // Indexability issues
+      // Case 1: robots_blocked with traffic
+      { url: 'https://agency.mavryk.io/traffic-robots-blocked', latest_title: '', latest_meta_description: '', latest_status_code: 403, latest_issues: ['robots_blocked'], latest_canonical_url: '', timestamp: todayStr },
+      // Case 2: robots_blocked in sitemap (no traffic)
+      { url: 'https://agency.mavryk.io/sitemap-only-robots-blocked', latest_title: '', latest_meta_description: '', latest_status_code: 403, latest_issues: ['robots_blocked'], latest_canonical_url: '', timestamp: todayStr },
+      // Case 3: noindex with traffic
+      { url: 'https://agency.mavryk.io/traffic-noindex', latest_title: 'Noindex page', latest_meta_description: 'Desc', latest_status_code: 200, latest_issues: ['noindex'], latest_canonical_url: 'https://agency.mavryk.io/traffic-noindex', timestamp: todayStr },
+      // Case 4: noindex in sitemap (no traffic)
+      { url: 'https://agency.mavryk.io/sitemap-only-noindex', latest_title: 'Noindex page 2', latest_meta_description: 'Desc 2', latest_status_code: 200, latest_issues: ['noindex'], latest_canonical_url: 'https://agency.mavryk.io/sitemap-only-noindex', timestamp: todayStr }
+    ];
+  }
+
+  console.log(`[Mock ClickHouse Query Result]: Returning ${rows.length} rows`);
+  return {
+    json: async () => rows
+  };
+};
 const { eq } = require('drizzle-orm');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const originalPost = axios.post;
+axios.post = async (url, data, config) => {
+  if (url.includes('/sitemap')) {
+    console.log(`[Mock Axios Post Sitemap]: ${url} with data:`, data);
+    return {
+      data: {
+        success: true,
+        urls: [
+          'https://agency.mavryk.io/',
+          'https://agency.mavryk.io/sitemap-only-robots-blocked',
+          'https://agency.mavryk.io/sitemap-only-noindex',
+        ]
+      }
+    };
+  }
+  return originalPost(url, data, config);
+};
+
 const { DetectorProcessor } = require('./dist/detector.processor');
 
 async function sleep(ms) {
@@ -18,9 +230,12 @@ async function run() {
 
   // 1. Start Python FastAPI Service in background
   console.log('Starting Python FastAPI AI Service on port 8083...');
-  const pythonBin = process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python';
-  const pythonProc = spawn(pythonBin, ['main.py'], {
-    cwd: '../ai',
+  const path = require('path');
+  const pythonBin = process.platform === 'win32' 
+    ? path.join(__dirname, '../ai/.venv/Scripts/python.exe') 
+    : path.join(__dirname, '../ai/.venv/bin/python');
+  const pythonProc = spawn(pythonBin, ['-u', 'main.py'], {
+    cwd: path.join(__dirname, '../ai'),
     env: { ...process.env, OPENAI_API_KEY: '' } // Force mock fallback for local deterministic test
   });
 
@@ -66,6 +281,19 @@ async function run() {
       slug: 'test-workspace',
     }).returning();
     workspace = newWs;
+  }
+
+  // Ensure membership exists
+  let membership = await db.query.memberships.findFirst({
+    where: (m, { and, eq }) => and(eq(m.userId, user.id), eq(m.workspaceId, workspace.id))
+  });
+  if (!membership) {
+    await db.insert(memberships).values({
+      userId: user.id,
+      workspaceId: workspace.id,
+      role: 'owner',
+    });
+    console.log('Seeded PostgreSQL workspace membership.');
   }
 
   let project = await db.query.projects.findFirst();
@@ -145,12 +373,25 @@ async function run() {
     format: 'JSONEachRow'
   });
 
-  // Feed 5: Orphan Page (crawled, but 0 links pointing to it)
+  // Feed 5: Orphan Page, Title/Meta, Redirect & Canonical Issues (crawled)
   await clickhouse.insert({
     table: `${chDb}.crawl_page_observations`,
     values: [
-      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/', status_code: 200, title: 'Home', meta_description: 'Home', load_time_ms: 100, page_size_bytes: 1000, word_count: 50, issues: [] },
-      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/orphan-contacts', status_code: 200, title: 'Contacts', meta_description: 'Contacts', load_time_ms: 100, page_size_bytes: 1000, word_count: 30, issues: [] }
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/', status_code: 200, title: 'Mavryk Agency - Best Enterprise SEO Platform', meta_description: 'Mavryk is the leading enterprise agency and SEO platform for content optimization.', load_time_ms: 100, page_size_bytes: 1000, word_count: 50, issues: [], canonical_url: 'https://agency.mavryk.io/' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/orphan-contacts', status_code: 200, title: 'Contacts Us', meta_description: 'Short desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 30, issues: [], canonical_url: 'https://agency.mavryk.io/orphan-contacts' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/about', status_code: 200, title: '', meta_description: 'This is a duplicate description.', load_time_ms: 100, page_size_bytes: 1000, word_count: 30, issues: [], canonical_url: 'https://agency.mavryk.io/about' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/services', status_code: 200, title: 'Services', meta_description: 'This is a duplicate description.', load_time_ms: 100, page_size_bytes: 1000, word_count: 30, issues: [], canonical_url: 'https://agency.mavryk.io/services' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/loop-redirect', status_code: 310, title: '', meta_description: '', load_time_ms: 0, page_size_bytes: 0, word_count: 0, issues: ['redirect_loop'], canonical_url: '' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/chain-redirect', status_code: 301, title: '', meta_description: '', load_time_ms: 0, page_size_bytes: 0, word_count: 0, issues: ['multiple_redirects', 'temporary_redirect'], canonical_url: '' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/temp-redirect', status_code: 302, title: '', meta_description: '', load_time_ms: 0, page_size_bytes: 0, word_count: 0, issues: ['temporary_redirect'], canonical_url: '' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/missing-canonical', status_code: 200, title: 'Missing Canonical Page', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: ['missing_canonical'], canonical_url: '' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/mismatch-canonical', status_code: 200, title: 'Mismatch Canonical Page', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: ['canonical_domain_mismatch'], canonical_url: 'https://otherdomain.com/mismatch-canonical' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/broken-canonical-source', status_code: 200, title: 'Broken Canonical Source', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: [], canonical_url: 'https://agency.mavryk.io/broken-canonical-target' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/broken-canonical-target', status_code: 404, title: 'Broken Canonical Target', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: ['error_status_code'], canonical_url: 'https://agency.mavryk.io/broken-canonical-target' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/redirect-canonical-source', status_code: 200, title: 'Redirect Canonical Source', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: [], canonical_url: 'https://agency.mavryk.io/redirect-canonical-target' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/redirect-canonical-target', status_code: 301, title: 'Redirect Canonical Target', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: ['temporary_redirect'], canonical_url: 'https://agency.mavryk.io/redirect-canonical-target' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/loop-canonical-a', status_code: 200, title: 'Loop Canonical A', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: [], canonical_url: 'https://agency.mavryk.io/loop-canonical-b' },
+      { timestamp: nowTimestampStr, site_id: siteId, url: 'https://agency.mavryk.io/loop-canonical-b', status_code: 200, title: 'Loop Canonical B', meta_description: 'Desc', load_time_ms: 100, page_size_bytes: 1000, word_count: 100, issues: [], canonical_url: 'https://agency.mavryk.io/loop-canonical-a' }
     ],
     format: 'JSONEachRow'
   });
@@ -200,6 +441,14 @@ async function run() {
     const hasStriking = titles.some(t => t.includes('striking') || t.includes('page 1') || t.includes('page 2'));
     const hasCannibal = titles.some(t => t.includes('cannibal'));
     const hasOrphan = titles.some(t => t.includes('orphan'));
+    const hasTitleMeta = titles.some(t => t.includes('title') || t.includes('meta description'));
+    const hasRedirect = titles.some(t => t.includes('redirect') || t.includes('chain'));
+    const hasCanonical = titles.some(t => t.includes('canonical'));
+    const hasIndexability = titles.some(t => t.includes('robots.txt') || t.includes('noindex') || t.includes('unblock') || t.includes('remove noindex'));
+    const hasInternalLink = titles.some(t => t.includes('internal link') || t.includes('add internal link'));
+    const hasCompetitorGain = titles.some(t => t.includes('competitor') && t.includes('gain') || t.includes('mitigate competitor'));
+    const hasLostRanking = titles.some(t => t.includes('recover') || t.includes('ranking drop'));
+    const hasWinningPage = titles.some(t => t.includes('winning page') || t.includes('traffic growth'));
 
     console.log('\n--- Match Checklist ---');
     console.log(`[${hasDecay ? 'x' : ' '}] Content Decay Detected`);
@@ -207,9 +456,17 @@ async function run() {
     console.log(`[${hasStriking ? 'x' : ' '}] Striking Distance Detected`);
     console.log(`[${hasCannibal ? 'x' : ' '}] Cannibalization Detected`);
     console.log(`[${hasOrphan ? 'x' : ' '}] Orphan Page Detected`);
+    console.log(`[${hasTitleMeta ? 'x' : ' '}] Title/Meta Issue Detected`);
+    console.log(`[${hasRedirect ? 'x' : ' '}] Redirect Issue Detected`);
+    console.log(`[${hasCanonical ? 'x' : ' '}] Canonical Issue Detected`);
+    console.log(`[${hasIndexability ? 'x' : ' '}] Indexability Issue Detected`);
+    console.log(`[${hasInternalLink ? 'x' : ' '}] Internal Link Opportunity Detected`);
+    console.log(`[${hasCompetitorGain ? 'x' : ' '}] Competitor Gain Detected`);
+    console.log(`[${hasLostRanking ? 'x' : ' '}] Lost Ranking Detected`);
+    console.log(`[${hasWinningPage ? 'x' : ' '}] Winning Page Detected`);
 
-    if (hasDecay && hasCtr && hasStriking && hasCannibal && hasOrphan) {
-      console.log('\n✅ All 5 SEO error/opportunity categories detected and recommendations created!');
+    if (hasDecay && hasCtr && hasStriking && hasCannibal && hasOrphan && hasTitleMeta && hasRedirect && hasCanonical && hasIndexability && hasInternalLink && hasCompetitorGain && hasLostRanking && hasWinningPage) {
+      console.log('\n✅ All 13 SEO error/opportunity categories detected and recommendations created!');
     } else {
       console.error('\n❌ Missing one or more expected recommendation types!');
       passed = false;

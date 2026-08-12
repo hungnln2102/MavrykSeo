@@ -15,6 +15,10 @@ export const workspaces = pgTable('workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  plan: text('plan').default('free').notNull(),
+  status: text('status').default('active').notNull(),
+  whiteLabelLogo: text('white_label_logo'),
+  whiteLabelColors: jsonb('white_label_colors'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -96,6 +100,8 @@ export const recommendations = pgTable('recommendations', {
   impactScore: integer('impact_score').default(0).notNull(),
   effortScore: integer('effort_score').default(0).notNull(),
   assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+  internalNotes: text('internal_notes'),
+  clientNotes: text('client_notes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -115,3 +121,47 @@ export const reports = pgTable('reports', {
 });
 export type Report = typeof reports.$inferSelect;
 export type NewReport = typeof reports.$inferInsert;
+
+export const topics = pgTable('topics', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  parentId: uuid('parent_id').references((): any => topics.id, { onDelete: 'cascade' }),
+  keywords: jsonb('keywords').$type<string[]>().default([]).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type Topic = typeof topics.$inferSelect;
+export type NewTopic = typeof topics.$inferInsert;
+
+export const contentPlans = pgTable('content_plans', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  topicId: uuid('topic_id').references(() => topics.id, { onDelete: 'set null' }),
+  title: text('title').notNull(),
+  primaryKeyword: text('primary_keyword').notNull(),
+  secondaryKeywords: jsonb('secondary_keywords').$type<string[]>().default([]).notNull(),
+  status: text('status').default('planned').notNull(),
+  dueDate: timestamp('due_date'),
+  body: text('body').default('').notNull(),
+  assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type ContentPlan = typeof contentPlans.$inferSelect;
+export type NewContentPlan = typeof contentPlans.$inferInsert;
+
+export const briefs = pgTable('briefs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  contentPlanId: uuid('content_plan_id').notNull().references(() => contentPlans.id, { onDelete: 'cascade' }).unique(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  targetWordCount: integer('target_word_count').default(1000).notNull(),
+  outline: jsonb('outline').default([]).notNull(),
+  competitorOutlines: jsonb('competitor_outlines').default([]).notNull(),
+  seoInstructions: text('seo_instructions').default('').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type Brief = typeof briefs.$inferSelect;
+export type NewBrief = typeof briefs.$inferInsert;
+

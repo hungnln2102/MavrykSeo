@@ -9,6 +9,14 @@ import { CtrOpportunityDetector } from './detectors/ctr-opportunity.detector';
 import { StrikingDistanceDetector } from './detectors/striking-distance.detector';
 import { CannibalizationDetector } from './detectors/cannibalization.detector';
 import { OrphanPageDetector } from './detectors/orphan-page.detector';
+import { TitleMetaIssueDetector } from './detectors/title-meta-issue.detector';
+import { RedirectIssueDetector } from './detectors/redirect-issue.detector';
+import { CanonicalIssueDetector } from './detectors/canonical-issue.detector';
+import { IndexabilityIssueDetector } from './detectors/indexability-issue.detector';
+import { InternalLinkOpportunityDetector } from './detectors/internal-link-opportunity.detector';
+import { CompetitorGainDetector } from './detectors/competitor-gain.detector';
+import { LostRankingDetector } from './detectors/lost-ranking.detector';
+import { WinningPageDetector } from './detectors/winning-page.detector';
 
 interface DetectorJobData {
   projectId: string;
@@ -82,19 +90,35 @@ export class DetectorProcessor implements OnModuleInit, OnModuleDestroy {
 
     console.log(`Running detectors on site: ${siteDomain} (siteId: ${siteId})`);
 
-    // 2. Execute all 5 detectors concurrently
+    // 2. Execute all 6 detectors concurrently
     const [
       contentDecaySignals,
       ctrOpportunitySignals,
       strikingDistanceSignals,
       cannibalizationSignals,
       orphanPageSignals,
+      titleMetaIssueSignals,
+      redirectIssueSignals,
+      canonicalIssueSignals,
+      indexabilityIssueSignals,
+      internalLinkOpportunitySignals,
+      competitorGainSignals,
+      lostRankingSignals,
+      winningPageSignals,
     ] = await Promise.all([
       ContentDecayDetector.detect(siteId),
       CtrOpportunityDetector.detect(siteId),
       StrikingDistanceDetector.detect(siteId),
       CannibalizationDetector.detect(projectId),
       OrphanPageDetector.detect(siteId, siteDomain),
+      TitleMetaIssueDetector.detect(siteId),
+      RedirectIssueDetector.detect(siteId),
+      CanonicalIssueDetector.detect(siteId),
+      IndexabilityIssueDetector.detect(siteId, siteDomain),
+      InternalLinkOpportunityDetector.detect(projectId, siteId, siteDomain),
+      CompetitorGainDetector.detect(projectId),
+      LostRankingDetector.detect(projectId),
+      WinningPageDetector.detect(siteId),
     ]);
 
     // Aggregate all signals
@@ -104,6 +128,14 @@ export class DetectorProcessor implements OnModuleInit, OnModuleDestroy {
       ...strikingDistanceSignals,
       ...cannibalizationSignals,
       ...orphanPageSignals,
+      ...titleMetaIssueSignals,
+      ...redirectIssueSignals,
+      ...canonicalIssueSignals,
+      ...indexabilityIssueSignals,
+      ...internalLinkOpportunitySignals,
+      ...competitorGainSignals,
+      ...lostRankingSignals,
+      ...winningPageSignals,
     ];
 
     console.log(`Aggregated ${aggregatedSignals.length} SEO signals. Invoking FastAPI AI service...`);

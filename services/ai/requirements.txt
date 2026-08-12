@@ -3,3 +3,8 @@ uvicorn>=0.22.0
 pydantic>=2.0
 openai>=1.0.0
 httpx>=0.24.0
+sentry-sdk[fastapi]>=2.0.0
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-exporter-otlp

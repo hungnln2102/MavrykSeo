@@ -109,4 +109,62 @@ export class WorkspacesService {
 
     return newMembership;
   }
+
+  async updateWorkspaceStatus(id: string, status: string) {
+    const [updated] = await db
+      .update(workspaces)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(workspaces.id, id))
+      .returning();
+
+    if (!updated) {
+      throw new NotFoundException('Workspace not found');
+    }
+    return updated;
+  }
+
+  async updateWorkspacePlan(id: string, plan: string) {
+    const [updated] = await db
+      .update(workspaces)
+      .set({ plan, updatedAt: new Date() })
+      .where(eq(workspaces.id, id))
+      .returning();
+
+    if (!updated) {
+      throw new NotFoundException('Workspace not found');
+    }
+    return updated;
+  }
+
+  async updateWorkspaceWhiteLabel(id: string, logo: string, colors: any) {
+    const [updated] = await db
+      .update(workspaces)
+      .set({ whiteLabelLogo: logo, whiteLabelColors: colors, updatedAt: new Date() })
+      .where(eq(workspaces.id, id))
+      .returning();
+
+    if (!updated) {
+      throw new NotFoundException('Workspace not found');
+    }
+    return {
+      whiteLabelLogo: updated.whiteLabelLogo,
+      whiteLabelColors: updated.whiteLabelColors,
+    };
+  }
+
+  async getWorkspaceWhiteLabel(id: string) {
+    const workspace = await db
+      .select({
+        whiteLabelLogo: workspaces.whiteLabelLogo,
+        whiteLabelColors: workspaces.whiteLabelColors,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .limit(1);
+
+    if (workspace.length === 0) {
+      throw new NotFoundException('Workspace not found');
+    }
+    return workspace[0];
+  }
 }

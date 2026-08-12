@@ -6,6 +6,9 @@ services:
       POSTGRES_PASSWORD: seo
       POSTGRES_DB: seo_platform
     ports: ["5435:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     ports: ["8123:8123","9000:9000"]
@@ -14,9 +17,15 @@ services:
       CLICKHOUSE_USER: seo
       CLICKHOUSE_PASSWORD: seo
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -24,3 +33,160 @@ services:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio12345
     ports: ["9001:9001","9002:9000"]
+    volumes:
+      - minio-data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgresql://seo:seo@postgres:5432/seo_platform
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_USER=seo
+      - CLICKHOUSE_PASSWORD=seo
+      - CLICKHOUSE_DB=seo_platform
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AI_SERVICE_URL=http://ai:8000
+      - CRAWLER_SERVICE_URL=http://crawler:8081
+      - COLLECTOR_SERVICE_URL=http://collector:8082
+      - JWT_SECRET=supersecret
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - SENTRY_DSN=
+    depends_on:
+      - postgres
+      - clickhouse
+      - redis
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - API_URL=http://api:3000
+    depends_on:
+      - api
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+      - API_URL=http://api:3000
+    depends_on:
+      - api
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://seo:seo@postgres:5432/seo_platform
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_USER=seo
+      - CLICKHOUSE_PASSWORD=seo
+      - CLICKHOUSE_DB=seo_platform
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - S3_ENDPOINT=minio
+      - S3_PORT=9000
+      - S3_ACCESS_KEY=minio
+      - S3_SECRET_KEY=minio12345
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - SENTRY_DSN=
+    depends_on:
+      - postgres
+      - clickhouse
+      - redis
+
+  ai:
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=mock-key
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - SENTRY_DSN=
+    depends_on:
+      - otel-collector
+
+  crawler:
+    build:
+      context: .
+      dockerfile: services/crawler/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - SENTRY_DSN=
+    depends_on:
+      - otel-collector
+
+  collector:
+    build:
+      context: .
+      dockerfile: services/collector/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - SENTRY_DSN=
+    depends_on:
+      - otel-collector
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+      - ai
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./infra/docker/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics exporter
+
+volumes:
+  postgres-data:
+  clickhouse-data:
+  redis-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:

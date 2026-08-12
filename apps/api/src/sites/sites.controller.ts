@@ -3,6 +3,8 @@ import { SitesService } from './sites.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
+import { Roles } from '../tenancy/roles.decorator';
+import { RolesGuard } from '../tenancy/roles.guard';
 
 @Controller('sites')
 @UseGuards(AuthGuard, TenantGuard)
@@ -10,6 +12,8 @@ export class SitesController {
   constructor(private readonly sitesService: SitesService) {}
 
   @Post()
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin')
   async createSite(
     @CurrentWorkspace() workspaceId: string,
     @Body() body: { projectId: string; domain: string }

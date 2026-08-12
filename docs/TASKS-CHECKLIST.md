@@ -54,29 +54,30 @@ Tài liệu này lưu trữ lộ trình phát triển chi tiết của dự án 
 ---
 
 ## 5. Trí tuệ nhân tạo (AI & NLP Service - Python)
-- [ ] Thiết lập cấu hình FastAPI project (`services/ai`) bằng Python
-- [ ] Xây dựng bộ tiền xử lý (Rules & Statistics) để tổng hợp tín hiệu SEO trước khi gửi cho LLM
-- [ ] Tích hợp kết nối LLM qua AI Gateway và định nghĩa kiểu dữ liệu phản hồi (Pydantic Output Validation)
+- [x] Thiết lập cấu hình FastAPI project (`services/ai`) bằng Python
+- [x] Xây dựng bộ tiền xử lý (Rules & Statistics) để tổng hợp tín hiệu SEO trước khi gửi cho LLM
+- [x] Tích hợp kết nối LLM qua AI Gateway và định nghĩa kiểu dữ liệu phản hồi (Pydantic Output Validation)
 
 ---
 
 ## 6. Bộ phân tích & Phát hiện lỗi SEO (SEO Detector Library)
-- [ ] Triển khai mã nguồn cho các bộ dò lỗi ban đầu theo spec:
-  - [ ] `CONTENT_DECAY` (Phát hiện nội dung giảm traffic theo thời gian)
-  - [ ] `CTR_OPPORTUNITY` (Cơ hội tối ưu click-through-rate)
-  - [ ] `STRIKING_DISTANCE` (Từ khóa tiệm cận top trang đầu)
-  - [ ] `CANNIBALIZATION` (Trùng lặp mục tiêu từ khóa)
-  - [ ] `ORPHAN_PAGE` (Các trang mồ côi không có link nội bộ)
-- [ ] Tự động sinh khuyến nghị hành động đẩy vào Action Center tương ứng với kết quả phân tích của detectors
+- [x] Triển khai mã nguồn cho các bộ dò lỗi ban đầu theo spec:
+  - [x] `CONTENT_DECAY` (Phát hiện nội dung giảm traffic theo thời gian)
+  - [x] `CTR_OPPORTUNITY` (Cơ hội tối ưu click-through-rate)
+  - [x] `STRIKING_DISTANCE` (Từ khóa tiệm cận top trang đầu)
+  - [x] `CANNIBALIZATION` (Trùng lặp mục tiêu từ khóa)
+  - [x] `ORPHAN_PAGE` (Các trang mồ côi không có link nội bộ)
+- [x] Tự động sinh khuyến nghị hành động đẩy vào Action Center tương ứng với kết quả phân tích của detectors
 
 ---
 
 ## 7. Giao diện người dùng (Frontend Apps)
-- [ ] Triển khai giao diện Dashboard chính, Insights và Action Center trên Next.js (`apps/web`)
-- [ ] Triển khai giao diện quản trị hệ thống (`apps/admin`) bảo vệ bằng Cloudflare Access
+- [x] Triển khai giao diện Dashboard chính, Insights và Action Center trên Next.js (`apps/web`)
+- [x] Triển khai giao diện quản trị hệ thống (`apps/admin`) bảo vệ bằng Cloudflare Access
 
 ---
 
 ## 8. Vận hành & Giám sát (Operations & Observability)
-- [ ] Cấu hình các Dockerfile multi-stage tối ưu hóa (non-root) cho tất cả dịch vụ
-- [ ] Tích hợp OpenTelemetry, Sentry để theo dõi lỗi ứng dụng và Prometheus/Grafana để theo dõi tài nguyên hệ thống
+- [x] Cấu hình các Dockerfile multi-stage tối ưu hóa (non-root) cho tất cả dịch vụ
+- [x] Tích hợp OpenTelemetry, Sentry để theo dõi lỗi ứng dụng và Prometheus/Grafana để theo dõi tài nguyên hệ thống
+

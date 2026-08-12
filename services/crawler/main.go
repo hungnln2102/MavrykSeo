@@ -10,10 +10,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/temoto/robotstxt"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/net/html"
 )
 
@@ -51,6 +56,7 @@ func isForbiddenIP(ip net.IP) bool {
 	}
 	return false
 }
+
 
 // safeDialContext resolves hostnames and blocks access to private IPs.
 func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -121,23 +127,26 @@ type CrawlRequest struct {
 }
 
 type CrawlResponse struct {
-	Success         bool     `json:"success"`
-	Error           string   `json:"error,omitempty"`
-	URL             string   `json:"url,omitempty"`
-	StatusCode      int      `json:"statusCode,omitempty"`
-	Title           string   `json:"title,omitempty"`
-	MetaDescription string   `json:"metaDescription,omitempty"`
-	CanonicalURL    string   `json:"canonicalUrl,omitempty"`
-	H1              []string `json:"h1,omitempty"`
-	H2              []string `json:"h2,omitempty"`
-	H3              []string `json:"h3,omitempty"`
-	H4              []string `json:"h4,omitempty"`
-	H5              []string `json:"h5,omitempty"`
-	H6              []string `json:"h6,omitempty"`
-	WordCount       int      `json:"wordCount,omitempty"`
-	Links           []string `json:"links,omitempty"`
-	RawHTML         string   `json:"rawHtml,omitempty"`
-	LoadTimeMs      int64    `json:"loadTimeMs,omitempty"`
+	Success             bool     `json:"success"`
+	Error               string   `json:"error,omitempty"`
+	URL                 string   `json:"url,omitempty"`
+	StatusCode          int      `json:"statusCode,omitempty"`
+	Title               string   `json:"title,omitempty"`
+	MetaDescription     string   `json:"metaDescription,omitempty"`
+	CanonicalURL        string   `json:"canonicalUrl,omitempty"`
+	H1                  []string `json:"h1,omitempty"`
+	H2                  []string `json:"h2,omitempty"`
+	H3                  []string `json:"h3,omitempty"`
+	H4                  []string `json:"h4,omitempty"`
+	H5                  []string `json:"h5,omitempty"`
+	H6                  []string `json:"h6,omitempty"`
+	WordCount           int      `json:"wordCount,omitempty"`
+	Links               []string `json:"links,omitempty"`
+	RawHTML             string   `json:"rawHtml,omitempty"`
+	LoadTimeMs          int64    `json:"loadTimeMs,omitempty"`
+	RedirectChain       []string `json:"redirectChain,omitempty"`
+	RedirectStatusCodes []int    `json:"redirectStatusCodes,omitempty"`
+	RobotsMeta          string   `json:"robotsMeta,omitempty"`
 }
 
 type SitemapRequest struct {
@@ -166,6 +175,45 @@ type URLSet struct {
 }
 
 func main() {
+	// Initialize Sentry
+	sentryDsn := os.Getenv("SENTRY_DSN")
+	if sentryDsn != "" {
+		err := sentry.Init(sentry.ClientOptions{
+			Dsn:              sentryDsn,
+			TracesSampleRate: 1.0,
+		})
+		if err != nil {
+			log.Printf("sentry.Init: %s", err)
+		} else {
+			fmt.Println("Sentry initialized successfully in Crawler")
+			defer sentry.Flush(2 * time.Second)
+		}
+	}
+
+	// Initialize OpenTelemetry Tracing
+	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if otelEndpoint != "" {
+		ctx := context.Background()
+		exporter, err := otlptracegrpc.New(ctx,
+			otlptracegrpc.WithInsecure(),
+			otlptracegrpc.WithEndpoint(otelEndpoint),
+		)
+		if err != nil {
+			log.Printf("failed to create OTel trace exporter: %v", err)
+		} else {
+			tp := trace.NewTracerProvider(
+				trace.WithBatcher(exporter),
+			)
+			otel.SetTracerProvider(tp)
+			fmt.Println("OpenTelemetry Tracing initialized successfully in Crawler")
+			defer func() {
+				if err := tp.Shutdown(ctx); err != nil {
+					log.Printf("Error terminating OTel tracer provider: %v", err)
+				}
+			}()
+		}
+	}
+
 	fmt.Println("SEO Crawler Service starting on port 8081...")
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +226,7 @@ func main() {
 
 	log.Fatal(http.ListenAndServe(":8081", nil))
 }
+
 
 func handleCrawl(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -263,6 +312,26 @@ func handleCrawl(w http.ResponseWriter, r *http.Request) {
 	seoData.StatusCode = resp.StatusCode
 	seoData.RawHTML = rawHtml
 	seoData.LoadTimeMs = loadTimeMs
+
+	if resp.Request != nil {
+		var redirectChain []string
+		var redirectStatusCodes []int
+		curr := resp.Request.Response
+		for curr != nil {
+			redirectChain = append([]string{curr.Request.URL.String()}, redirectChain...)
+			redirectStatusCodes = append([]int{curr.StatusCode}, redirectStatusCodes...)
+			if curr.Request != nil {
+				curr = curr.Request.Response
+			} else {
+				break
+			}
+		}
+		if len(redirectChain) > 0 {
+			redirectChain = append(redirectChain, resp.Request.URL.String())
+			seoData.RedirectChain = redirectChain
+			seoData.RedirectStatusCodes = redirectStatusCodes
+		}
+	}
 
 	json.NewEncoder(w).Encode(seoData)
 }
@@ -367,6 +436,8 @@ func parseHTML(htmlStr string) CrawlResponse {
 				}
 				if name == "description" {
 					res.MetaDescription = content
+				} else if name == "robots" {
+					res.RobotsMeta = content
 				}
 			case "link":
 				var rel, href string

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Param, UseGuards, BadRequestException } from '@nestjs/common';
 import { SitesService } from './sites.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
@@ -33,5 +33,15 @@ export class SitesController {
       throw new BadRequestException('projectId query parameter is required');
     }
     return this.sitesService.getSites(workspaceId, projectId);
+  }
+
+  @Post(':siteId/crawl')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async triggerCrawl(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+  ) {
+    return this.sitesService.triggerCrawl(workspaceId, siteId);
   }
 }

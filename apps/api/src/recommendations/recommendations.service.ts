@@ -70,4 +70,70 @@ export class RecommendationsService {
 
     return updated;
   }
+
+  async updateRecommendationAssignee(workspaceId: string, recommendationId: string, assigneeId: string | null) {
+    // Enforce tenant boundary: check project belongs to workspace
+    const owningProject = await db
+      .select({ projectId: projects.id })
+      .from(recommendations)
+      .innerJoin(projects, eq(recommendations.projectId, projects.id))
+      .where(
+        and(
+          eq(recommendations.id, recommendationId),
+          eq(projects.workspaceId, workspaceId)
+        )
+      )
+      .limit(1);
+
+    if (owningProject.length === 0) {
+      throw new NotFoundException('Recommendation not found in this workspace');
+    }
+
+    const [updated] = await db
+      .update(recommendations)
+      .set({
+        assigneeId,
+        updatedAt: new Date(),
+      })
+      .where(eq(recommendations.id, recommendationId))
+      .returning();
+
+    return updated;
+  }
+
+  async updateRecommendationNotes(
+    workspaceId: string,
+    recommendationId: string,
+    internalNotes?: string | null,
+    clientNotes?: string | null
+  ) {
+    // Enforce tenant boundary: check project belongs to workspace
+    const owningProject = await db
+      .select({ projectId: projects.id })
+      .from(recommendations)
+      .innerJoin(projects, eq(recommendations.projectId, projects.id))
+      .where(
+        and(
+          eq(recommendations.id, recommendationId),
+          eq(projects.workspaceId, workspaceId)
+        )
+      )
+      .limit(1);
+
+    if (owningProject.length === 0) {
+      throw new NotFoundException('Recommendation not found in this workspace');
+    }
+
+    const updateFields: any = { updatedAt: new Date() };
+    if (internalNotes !== undefined) updateFields.internalNotes = internalNotes;
+    if (clientNotes !== undefined) updateFields.clientNotes = clientNotes;
+
+    const [updated] = await db
+      .update(recommendations)
+      .set(updateFields)
+      .where(eq(recommendations.id, recommendationId))
+      .returning();
+
+    return updated;
+  }
 }

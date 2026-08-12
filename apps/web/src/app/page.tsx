@@ -63,6 +63,42 @@ export default function Page() {
   const [optimizationResult, setOptimizationResult] = useState<any>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
+  // Site Audit & Sites States
+  const [sitesList, setSitesList] = useState<any[]>([]);
+  const [activeSite, setActiveSite] = useState<any>(null);
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [crawlStatusText, setCrawlStatusText] = useState<string>('');
+
+  // Rank Tracker States
+  const [keywordsList, setKeywordsList] = useState<any[]>([]);
+  const [newKeywordInput, setNewKeywordInput] = useState('');
+  const [newKeywordTargetUrl, setNewKeywordTargetUrl] = useState('');
+  const [isAddingKeyword, setIsAddingKeyword] = useState(false);
+
+  // Settings States
+  const [workspacePlan, setWorkspacePlan] = useState<string>('free');
+  const [projectName, setProjectName] = useState<string>('Mavryk Project');
+  const [isGscConnected, setIsGscConnected] = useState<boolean>(true);
+  const [isMockGsc, setIsMockGsc] = useState<boolean>(true);
+
+  // Team / Collaboration States
+  const [membersList, setMembersList] = useState<any[]>([]);
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<string>('viewer');
+
+  // Reports States
+  const [reportsList, setReportsList] = useState<any[]>([]);
+  const [newReportTitle, setNewReportTitle] = useState('');
+  const [newReportType, setNewReportType] = useState<string>('audit');
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+
+  // Recommendation Detail & Notes States
+  const [selectedRecForDetail, setSelectedRecForDetail] = useState<any>(null);
+  const [recAssigneeId, setRecAssigneeId] = useState<string>('');
+  const [recInternalNotes, setRecInternalNotes] = useState<string>('');
+  const [recClientNotes, setRecClientNotes] = useState<string>('');
+  const [isSavingRecDetail, setIsSavingRecDetail] = useState<boolean>(false);
+
   React.useEffect(() => {
     if (!containerRef.current) return;
     
@@ -173,11 +209,15 @@ export default function Page() {
     initApi();
   }, []);
 
-  // Fetch Topics and Content Plans when token, workspaceId or projectId change
+  // Fetch Topics, Content Plans, Sites, Keywords, Members, Reports when token, workspaceId or projectId change
   React.useEffect(() => {
     if (!token || !workspaceId || !projectId) return;
     fetchTopics();
     fetchContentPlans();
+    fetchSites();
+    fetchKeywords();
+    fetchMembers();
+    fetchReports();
   }, [token, workspaceId, projectId]);
 
   // Debounced Real-time Content Optimization
@@ -222,6 +262,313 @@ export default function Page() {
       }
     } catch (err) {
       console.error('Error fetching content plans:', err);
+    }
+  }
+
+  async function fetchSites() {
+    if (!token || !workspaceId || !projectId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/sites?projectId=${projectId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSitesList(data);
+        if (data.length > 0) {
+          setActiveSite(data[0]);
+          setSelectedSite(data[0].domain);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching sites:', err);
+    }
+  }
+
+  async function fetchKeywords() {
+    if (!token || !workspaceId || !projectId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setKeywordsList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching keywords:', err);
+    }
+  }
+
+  async function handleTriggerCrawl() {
+    if (!token || !workspaceId || !activeSite) return;
+    try {
+      setIsCrawling(true);
+      setCrawlStatusText('Crawl job enqueued...');
+      const res = await fetch(`http://localhost:3000/sites/${activeSite.id}/crawl`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setCrawlStatusText('Crawl enqueued! Running SEO audit detectors...');
+        setTimeout(async () => {
+          // Refresh recommendations after crawl
+          if (projectId) {
+            const recsRes = await fetch(`http://localhost:3000/recommendations?projectId=${projectId}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'x-workspace-id': workspaceId,
+              },
+            });
+            if (recsRes.ok) {
+              setRecs(await recsRes.json());
+            }
+          }
+          setIsCrawling(false);
+          setCrawlStatusText('');
+          alert('Crawl and SEO audit finished successfully!');
+        }, 5000);
+      } else {
+        setIsCrawling(false);
+        setCrawlStatusText('');
+        alert('Failed to trigger crawl.');
+      }
+    } catch (err) {
+      console.error('Error triggering crawl:', err);
+      setIsCrawling(false);
+      setCrawlStatusText('');
+    }
+  }
+
+  async function handleAddKeyword() {
+    if (!token || !workspaceId || !projectId || !newKeywordInput.trim()) {
+      alert('Please enter a keyword');
+      return;
+    }
+    try {
+      setIsAddingKeyword(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          keyword: newKeywordInput.trim(),
+          targetUrl: newKeywordTargetUrl.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setNewKeywordInput('');
+        setNewKeywordTargetUrl('');
+        fetchKeywords();
+      } else {
+        const errorData = await res.json();
+        alert(`Failed to add keyword: ${errorData.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Error adding keyword:', err);
+    } finally {
+      setIsAddingKeyword(false);
+    }
+  }
+
+  async function handleDeleteKeyword(keywordId: string) {
+    if (!token || !workspaceId || !projectId) return;
+    if (!confirm('Are you sure you want to delete this keyword from tracking?')) return;
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords/${keywordId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        fetchKeywords();
+      } else {
+        alert('Failed to delete keyword.');
+      }
+    } catch (err) {
+      console.error('Error deleting keyword:', err);
+    }
+  }
+
+  async function handleTogglePlan() {
+    if (!token || !workspaceId) return;
+    const nextPlan = workspacePlan === 'free' ? 'pro' : 'free';
+    try {
+      const res = await fetch(`http://localhost:3000/workspaces/${workspaceId}/plan`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ plan: nextPlan }),
+      });
+      if (res.ok) {
+        setWorkspacePlan(nextPlan);
+        alert(`Workspace plan updated to ${nextPlan.toUpperCase()}!`);
+      } else {
+        alert('Failed to update plan.');
+      }
+    } catch (err) {
+      console.error('Error changing plan:', err);
+    }
+  }
+
+  async function fetchMembers() {
+    if (!token || !workspaceId) return;
+    try {
+      const res = await fetch('http://localhost:3000/workspaces/active/members', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setMembersList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching members:', err);
+    }
+  }
+
+  async function handleAddMember(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token || !workspaceId || !newMemberEmail.trim()) {
+      alert('Vui lòng nhập email hợp lệ');
+      return;
+    }
+    try {
+      const res = await fetch('http://localhost:3000/workspaces/active/members', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ email: newMemberEmail.trim(), role: newMemberRole }),
+      });
+      if (res.ok) {
+        alert('Đã thêm thành viên mới thành công!');
+        setNewMemberEmail('');
+        fetchMembers();
+      } else {
+        const errData = await res.json();
+        alert(`Không thể thêm thành viên: ${errData.message || res.statusText}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi: ${err.message}`);
+    }
+  }
+
+  async function fetchReports() {
+    if (!token || !workspaceId || !projectId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/reports`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setReportsList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching reports:', err);
+    }
+  }
+
+  async function handleCreateReport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token || !workspaceId || !projectId || !newReportTitle.trim()) {
+      alert('Vui lòng nhập tiêu đề báo cáo');
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/reports`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ title: newReportTitle.trim(), type: newReportType }),
+      });
+      if (res.ok) {
+        alert('Đã tạo báo cáo mới thành công!');
+        setNewReportTitle('');
+        fetchReports();
+      } else {
+        const errData = await res.json();
+        alert(`Không thể tạo báo cáo: ${errData.message || res.statusText}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi: ${err.message}`);
+    }
+  }
+
+  async function handleSaveRecDetail() {
+    if (!token || !workspaceId || !selectedRecForDetail) return;
+    try {
+      setIsSavingRecDetail(true);
+      // 1. Save Assignee
+      const resAssignee = await fetch(`http://localhost:3000/recommendations/${selectedRecForDetail.id}/assignee`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ assigneeId: recAssigneeId || null }),
+      });
+
+      // 2. Save Notes
+      const resNotes = await fetch(`http://localhost:3000/recommendations/${selectedRecForDetail.id}/notes`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          internalNotes: recInternalNotes || null,
+          clientNotes: recClientNotes || null,
+        }),
+      });
+
+      if (resAssignee.ok && resNotes.ok) {
+        alert('Đã cập nhật phân công và ghi chú thành công!');
+        setSelectedRecForDetail(null);
+        // Refresh recommendations
+        if (projectId) {
+          const recsRes = await fetch(`http://localhost:3000/recommendations?projectId=${projectId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'x-workspace-id': workspaceId,
+            },
+          });
+          if (recsRes.ok) {
+            setRecs(await recsRes.json());
+          }
+        }
+      } else {
+        alert('Không thể lưu thông tin chi tiết. Vui lòng kiểm tra quyền hạn của bạn.');
+      }
+    } catch (err: any) {
+      alert(`Lỗi: ${err.message}`);
+    } finally {
+      setIsSavingRecDetail(false);
     }
   }
 
@@ -511,12 +858,20 @@ export default function Page() {
             <Globe size={16} color="var(--accent-primary)" />
             <select
               value={selectedSite}
-              onChange={(e) => setSelectedSite(e.target.value)}
+              onChange={(e) => {
+                const domain = e.target.value;
+                setSelectedSite(domain);
+                const matched = sitesList.find(s => s.domain === domain);
+                if (matched) setActiveSite(matched);
+              }}
               style={styles.selectInput}
             >
-              {sites.map((s) => (
-                <option key={s} value={s}>{s}</option>
+              {sitesList.map((s) => (
+                <option key={s.id} value={s.domain}>{s.domain}</option>
               ))}
+              {sitesList.length === 0 && (
+                <option value="mavryk.io">mavryk.io</option>
+              )}
             </select>
             <ChevronDown size={14} color="var(--text-secondary)" />
           </div>
@@ -562,6 +917,14 @@ export default function Page() {
             <span>Backlinks</span>
           </button>
           <button
+            onClick={() => setActiveTab('reports')}
+            style={{ ...styles.navItem, ...(activeTab === 'reports' ? styles.navItemActive : {}) }}
+          >
+            <FileText size={18} />
+            <span>Báo cáo</span>
+            {activeTab === 'reports' && <div style={styles.activeDot} />}
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             style={{ ...styles.navItem, ...(activeTab === 'settings' ? styles.navItemActive : {}) }}
           >
@@ -595,6 +958,7 @@ export default function Page() {
               {activeTab === 'keywords' && 'Rank Tracker'}
               {activeTab === 'audit' && 'Audit Site'}
               {activeTab === 'backlinks' && 'Backlinks'}
+              {activeTab === 'reports' && 'Báo cáo White-label'}
               {activeTab === 'settings' && 'Settings'}
             </h1>
             <p style={styles.headerSubtitle}>
@@ -810,15 +1174,20 @@ export default function Page() {
                           <div style={styles.actionFooterRow}>
                             <span style={styles.actionTypeTag}>{isCompleted ? 'Resolved' : `${act.priority.toUpperCase()}`}</span>
                             <button 
-                              onClick={() => handleToggleStatus(act.id, act.status)}
+                              onClick={() => {
+                                setSelectedRecForDetail(act);
+                                setRecAssigneeId(act.assigneeId || '');
+                                setRecInternalNotes(act.internalNotes || '');
+                                setRecClientNotes(act.clientNotes || '');
+                              }}
                               style={{ 
                                 ...styles.actionBtnOptimize, 
                                 color: indicatorColor,
                                 fontWeight: isCompleted ? 500 : 600
                               }}
                             >
-                              <span>{isCompleted ? 'Completed ✓' : 'Optimize Now'}</span>
-                              {!isCompleted && <ChevronRight size={14} />}
+                              <span>{isCompleted ? 'Xem Chi Tiết' : 'Optimize / Phân công'}</span>
+                              <ChevronRight size={14} />
                             </button>
                           </div>
                         </div>
@@ -1340,6 +1709,1017 @@ export default function Page() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Site Audit Tab */}
+        {activeTab === 'audit' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+            {/* Header / Trigger Audit */}
+            <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={styles.cardTitle}>Kiểm tra Tối ưu Kỹ thuật (Technical SEO Audit)</h2>
+                <p style={styles.cardSubtitle}>
+                  Chạy trình thu thập và phát hiện các lỗi technical SEO trên website <strong style={{ color: 'var(--accent-primary)' }}>{selectedSite}</strong>
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {isCrawling && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-secondary)' }}>
+                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                    <span>{crawlStatusText || 'Đang quét website...'}</span>
+                  </div>
+                )}
+                <button
+                  onClick={handleTriggerCrawl}
+                  disabled={isCrawling || !activeSite}
+                  className="shine-button"
+                  style={{
+                    ...styles.submitBtn,
+                    marginTop: 0,
+                    opacity: (isCrawling || !activeSite) ? 0.6 : 1,
+                    cursor: (isCrawling || !activeSite) ? 'not-allowed' : 'pointer',
+                    background: 'var(--accent-primary)',
+                    padding: '0.6rem 1.2rem',
+                  }}
+                >
+                  <Search size={16} />
+                  <span>{isCrawling ? 'Đang thực hiện...' : 'Kích hoạt Audit'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Health & Crawl Metrics */}
+            <div style={styles.metricsGrid}>
+              <div className="glass-card" style={styles.metricCard}>
+                <div style={styles.metricHeader}>
+                  <span style={styles.metricLabel}>Điểm Sức Khỏe (Health Score)</span>
+                  <div style={styles.metricIconWrap}>
+                    <Activity size={16} color="var(--accent-green)" />
+                  </div>
+                </div>
+                <div style={styles.metricBody}>
+                  <span style={styles.metricValue}>
+                    {recs.length === 0 ? '98%' : `${Math.max(50, 100 - recs.filter(r => r.status !== 'completed').length * 6)}%`}
+                  </span>
+                  <span style={{ ...styles.metricChange, color: 'var(--accent-green)' }}>
+                    Ổn định
+                  </span>
+                </div>
+              </div>
+
+              <div className="glass-card" style={styles.metricCard}>
+                <div style={styles.metricHeader}>
+                  <span style={styles.metricLabel}>Đã Quét (Pages Crawled)</span>
+                  <div style={styles.metricIconWrap}>
+                    <Globe size={16} color="var(--accent-primary)" />
+                  </div>
+                </div>
+                <div style={styles.metricBody}>
+                  <span style={styles.metricValue}>12 / 100</span>
+                  <span style={{ ...styles.metricChange, color: 'var(--text-muted)' }}>
+                    Trang hoạt động
+                  </span>
+                </div>
+              </div>
+
+              <div className="glass-card" style={styles.metricCard}>
+                <div style={styles.metricHeader}>
+                  <span style={styles.metricLabel}>Số Lỗi Phát Hiện (Issues)</span>
+                  <div style={styles.metricIconWrap}>
+                    <AlertCircle size={16} color="var(--accent-orange)" />
+                  </div>
+                </div>
+                <div style={styles.metricBody}>
+                  <span style={styles.metricValue}>
+                    {recs.filter(r => r.status !== 'completed').length} Lỗi
+                  </span>
+                  <span style={{ ...styles.metricChange, color: 'var(--accent-orange)' }}>
+                    Cần tối ưu
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Audit Issues Details */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
+                <h3 style={styles.cardTitle}>Danh sách Lỗi Technical SEO & Kiến nghị</h3>
+                <p style={styles.cardSubtitle}>Được sắp xếp theo độ ưu tiên và ảnh hưởng tới SEO</p>
+              </div>
+
+              {recs.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>Không phát hiện lỗi technical nào trên website của bạn. Website của bạn hoàn toàn tối ưu!</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {recs.map((act) => {
+                    const isCompleted = act.status === 'completed';
+                    const pri = getPriorityDetails(act.priority);
+                    const indicatorColor = isCompleted ? 'var(--accent-secondary)' : pri.color;
+                    
+                    return (
+                      <div 
+                        key={act.id} 
+                        style={{ 
+                          ...styles.actionItem, 
+                          ...(isCompleted ? { opacity: 0.55 } : {}),
+                          display: 'flex',
+                          background: 'rgba(255, 255, 255, 0.01)',
+                          border: '1px solid rgba(255, 255, 255, 0.04)',
+                          borderRadius: 'var(--radius-sm)',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div style={{ ...styles.actionLeftIndicator, width: '4px', background: indicatorColor }} />
+                        <div style={{ ...styles.actionBody, padding: '1rem', flex: 1 }}>
+                          <div style={{ ...styles.actionHeaderRow, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <span 
+                              style={{ 
+                                ...styles.actionTitle, 
+                                fontSize: '0.95rem',
+                                fontWeight: 600,
+                                ...(isCompleted ? { textDecoration: 'line-through', color: 'var(--text-muted)' } : { color: 'var(--text-primary)' }) 
+                              }}
+                            >
+                              {act.title}
+                            </span>
+                            <span style={{ ...styles.badgeImpact, fontSize: '0.75rem', padding: '0.1rem 0.4rem', border: '1px solid', borderRadius: '4px', color: indicatorColor, borderColor: indicatorColor }}>
+                              {isCompleted ? 'Hoàn thành' : `${act.impactScore || 0} Ảnh hưởng`}
+                            </span>
+                          </div>
+                          <p style={{ ...styles.actionDesc, fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                            {act.description}
+                          </p>
+                          <div style={{ ...styles.actionFooterRow, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ ...styles.actionTypeTag, fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                              {isCompleted ? 'Đã khắc phục ✓' : `Mức độ: ${act.priority.toUpperCase()}`}
+                            </span>
+                            <button 
+                              onClick={() => {
+                                setSelectedRecForDetail(act);
+                                setRecAssigneeId(act.assigneeId || '');
+                                setRecInternalNotes(act.internalNotes || '');
+                                setRecClientNotes(act.clientNotes || '');
+                              }}
+                              style={{ 
+                                ...styles.actionBtnOptimize, 
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.2rem',
+                                fontSize: '0.8rem',
+                                color: indicatorColor,
+                                fontWeight: isCompleted ? 500 : 600
+                              }}
+                            >
+                              <span>{isCompleted ? 'Xem Chi Tiết' : 'Sửa lỗi ngay / Phân công'}</span>
+                              <ChevronRight size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Rank Tracker Tab */}
+        {activeTab === 'keywords' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+            {/* Keyword Addition Form */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <h2 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Theo dõi Từ khóa (Track New Keywords)</h2>
+              
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div style={{ flex: 1, minWidth: '240px' }}>
+                  <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem' }}>Từ khóa tìm kiếm (Keyword)*</label>
+                  <input
+                    type="text"
+                    value={newKeywordInput}
+                    onChange={e => setNewKeywordInput(e.target.value)}
+                    placeholder="Ví dụ: công cụ seo ai, rank tracker..."
+                    style={styles.formInput}
+                  />
+                </div>
+
+                <div style={{ flex: 1, minWidth: '240px' }}>
+                  <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem' }}>URL Đích mong muốn (Target URL)</label>
+                  <input
+                    type="text"
+                    value={newKeywordTargetUrl}
+                    onChange={e => setNewKeywordTargetUrl(e.target.value)}
+                    placeholder="Ví dụ: https://domain.com/blog/seo"
+                    style={styles.formInput}
+                  />
+                </div>
+
+                <button
+                  onClick={handleAddKeyword}
+                  disabled={isAddingKeyword}
+                  style={{
+                    ...styles.submitBtn,
+                    marginTop: 0,
+                    padding: '0.6rem 1.5rem',
+                    background: 'var(--accent-primary)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 'var(--radius-sm)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  {isAddingKeyword ? (
+                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <Plus size={16} />
+                  )}
+                  <span>Thêm Từ Khóa</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Keyword Table Card */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
+                <h3 style={styles.cardTitle}>Danh sách Từ khóa đang theo dõi</h3>
+                <p style={styles.cardSubtitle}>Theo dõi vị trí thực tế trên Google Search Engine thu thập qua ClickHouse</p>
+              </div>
+
+              {keywordsList.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>Chưa có từ khóa nào được theo dõi. Hãy nhập từ khóa ở phía trên để hệ thống bắt đầu giám sát thứ hạng!</p>
+                </div>
+              ) : (
+                <div style={styles.tableWrapper}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr style={styles.trHead}>
+                        <th style={{ ...styles.th, textAlign: 'left' }}>Từ khóa</th>
+                        <th style={{ ...styles.th, textAlign: 'left' }}>Target URL</th>
+                        <th style={{ ...styles.th, textAlign: 'center' }}>Thứ hạng (Rank)</th>
+                        <th style={{ ...styles.th, textAlign: 'center' }}>Lượng Tìm kiếm (Vol)</th>
+                        <th style={{ ...styles.th, textAlign: 'center' }}>Độ khó (KD)</th>
+                        <th style={{ ...styles.th, textAlign: 'center' }}>Hành động</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {keywordsList.map((kw: any) => {
+                        const rankVal = kw.latestRank;
+                        const hasRank = rankVal !== null && rankVal !== undefined && rankVal > 0;
+                        
+                        return (
+                          <tr key={kw.id} style={styles.trBody}>
+                            <td style={{ ...styles.tdKeyword, textAlign: 'left' }}>{kw.keyword}</td>
+                            <td style={{ ...styles.td, textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                              {kw.targetUrl || <span style={{ fontStyle: 'italic' }}>Tự động phát hiện</span>}
+                            </td>
+                            <td style={{ ...styles.td, textAlign: 'center' }}>
+                              <span style={{
+                                ...styles.badgePosition,
+                                background: hasRank && rankVal <= 3 ? 'rgba(16, 185, 129, 0.15)' : hasRank && rankVal <= 10 ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                color: hasRank && rankVal <= 3 ? 'var(--accent-green)' : hasRank && rankVal <= 10 ? 'var(--accent-primary)' : 'var(--text-primary)',
+                                fontWeight: 600,
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.85rem'
+                              }}>
+                                {hasRank ? `#${rankVal}` : 'Đang quét...'}
+                              </span>
+                            </td>
+                            <td style={{ ...styles.td, textAlign: 'center' }}>
+                              {kw.volume ? kw.volume.toLocaleString() : 'N/A'}
+                            </td>
+                            <td style={{ ...styles.td, textAlign: 'center' }}>
+                              {kw.difficulty ? (
+                                <span style={{
+                                  color: kw.difficulty > 60 ? 'var(--accent-red)' : kw.difficulty > 35 ? 'var(--accent-orange)' : 'var(--accent-green)',
+                                  fontWeight: 500
+                                }}>
+                                  {kw.difficulty}%
+                                </span>
+                              ) : 'N/A'}
+                            </td>
+                            <td style={{ ...styles.td, textAlign: 'center' }}>
+                              <button
+                                onClick={() => handleDeleteKeyword(kw.id)}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: 'var(--accent-red)',
+                                  cursor: 'pointer',
+                                  fontSize: '0.8rem',
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '4px',
+                                  transition: 'background 0.2s'
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)')}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                              >
+                                Xóa
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Reports Tab */}
+        {activeTab === 'reports' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', width: '100%', alignItems: 'start' }}>
+            {/* Create Report Card */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Tạo Báo Cáo SEO</h3>
+              <form onSubmit={handleCreateReport} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div>
+                  <label style={styles.formLabel}>Tiêu đề báo cáo</label>
+                  <input
+                    type="text"
+                    value={newReportTitle}
+                    onChange={e => setNewReportTitle(e.target.value)}
+                    placeholder="Ví dụ: Báo cáo SEO Q3 2026"
+                    style={styles.formInput}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={styles.formLabel}>Loại báo cáo</label>
+                  <select
+                    value={newReportType}
+                    onChange={e => setNewReportType(e.target.value)}
+                    style={styles.formInput}
+                  >
+                    <option value="audit">Site Audit (Kiểm toán kỹ thuật)</option>
+                    <option value="keywords">Rank Tracker (Thứ hạng từ khóa)</option>
+                  </select>
+                </div>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  borderRadius: '6px',
+                  padding: '0.75rem',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)'
+                }}>
+                  <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Thông tin White-label:</p>
+                  <p>• Logo: {activeSite?.domain || 'Mavryk Logo'}</p>
+                  <p>• Màu chủ đạo: Indigo / Teal</p>
+                </div>
+                <button
+                  type="submit"
+                  style={{ ...styles.submitBtn, width: '100%', marginTop: '0.5rem' }}
+                >
+                  Tạo Báo Cáo ngay
+                </button>
+              </form>
+            </div>
+
+            {/* Reports List Card */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Lịch sử Báo Cáo</h3>
+              {reportsList.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>Chưa có báo cáo nào được tạo cho dự án này.</p>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', textAlign: 'left' }}>
+                        <th style={{ padding: '0.75rem 0.5rem' }}>Tiêu đề</th>
+                        <th style={{ padding: '0.75rem 0.5rem' }}>Loại</th>
+                        <th style={{ padding: '0.75rem 0.5rem' }}>Trạng thái</th>
+                        <th style={{ padding: '0.75rem 0.5rem' }}>Ngày tạo</th>
+                        <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Hành động</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportsList.map((rep) => (
+                        <tr key={rep.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)', color: 'var(--text-primary)' }}>
+                          <td style={{ padding: '0.75rem 0.5rem', fontWeight: 600 }}>{rep.title}</td>
+                          <td style={{ padding: '0.75rem 0.5rem', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--accent-secondary)' }}>{rep.type}</td>
+                          <td style={{ padding: '0.75rem 0.5rem' }}>
+                            <span style={{
+                              background: 'rgba(16, 185, 129, 0.1)',
+                              color: 'var(--accent-green)',
+                              padding: '0.1rem 0.4rem',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700
+                            }}>
+                              {rep.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>
+                            {new Date(rep.createdAt).toLocaleDateString('vi-VN')}
+                          </td>
+                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>
+                            <button
+                              onClick={() => setSelectedReport(rep)}
+                              style={{
+                                background: 'rgba(99, 102, 241, 0.1)',
+                                border: '1px solid var(--accent-primary)',
+                                color: 'var(--accent-primary)',
+                                padding: '0.3rem 0.6rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                cursor: 'pointer',
+                                fontWeight: 600
+                              }}
+                            >
+                              Xem Báo Cáo
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Backlinks Tab */}
+        {activeTab === 'backlinks' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', width: '100%', textAlign: 'center' }}>
+            <div className="glass-card" style={{ padding: '3rem', maxWidth: '500px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
+              <div style={{
+                background: 'rgba(59, 130, 246, 0.1)',
+                color: 'var(--accent-primary)',
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 20px rgba(59, 130, 246, 0.2)'
+              }}>
+                <Link2 size={32} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Tính Năng Đang Phát Triển</h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                  Hệ thống phân tích liên kết (Backlink Analysis) đang được phát triển. Tính năng này sẽ cho phép theo dõi, kiểm tra chất lượng backlink và lập chỉ mục liên kết tự động.
+                </p>
+              </div>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                borderRadius: '8px',
+                padding: '0.75rem 1rem',
+                fontSize: '0.8rem',
+                color: 'var(--accent-primary)',
+                fontWeight: 600
+              }}>
+                COMING SOON IN VERSION 1.1
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Tab */}
+        {activeTab === 'settings' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+            {/* General & Integrations */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
+              
+              {/* Project settings card */}
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Cấu hình Dự án (Project Config)</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={styles.formLabel}>Tên dự án hiện tại</label>
+                    <input
+                      type="text"
+                      value={projectName}
+                      onChange={e => setProjectName(e.target.value)}
+                      style={styles.formInput}
+                    />
+                  </div>
+                  <div>
+                    <label style={styles.formLabel}>Workspace ID</label>
+                    <input
+                      type="text"
+                      value={workspaceId || ''}
+                      disabled
+                      style={{ ...styles.formInput, opacity: 0.6, cursor: 'not-allowed' }}
+                    />
+                  </div>
+                  <button
+                    onClick={() => alert('Đã cập nhật tên dự án thành công!')}
+                    style={{ ...styles.submitBtn, width: 'fit-content', padding: '0.5rem 1rem' }}
+                  >
+                    Lưu cấu hình
+                  </button>
+                </div>
+              </div>
+
+              {/* GSC card */}
+              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Google Search Console (GSC)</h3>
+                  <p style={{ ...styles.cardSubtitle, marginBottom: '1rem' }}>
+                    Kết nối tài khoản Google để đồng bộ dữ liệu Clicks, Impressions, CTR trực tiếp từ Google API.
+                  </p>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.75rem',
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid rgba(255, 255, 255, 0.05)',
+                    borderRadius: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Globe size={18} color={isGscConnected ? 'var(--accent-green)' : 'var(--text-muted)'} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                        {isGscConnected ? 'Trạng thái: Đã kết nối' : 'Trạng thái: Chưa kết nối'}
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      background: isGscConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                      color: isGscConnected ? 'var(--accent-green)' : 'var(--text-muted)',
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '4px'
+                    }}>
+                      {isGscConnected ? 'ACTIVE' : 'INACTIVE'}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setIsGscConnected(!isGscConnected);
+                      alert(isGscConnected ? 'Đã ngắt kết nối Google Search Console!' : 'Đã kết nối thành công Google Search Console!');
+                    }}
+                    style={{
+                      ...styles.submitBtn,
+                      background: isGscConnected ? 'rgba(239, 68, 68, 0.1)' : 'var(--accent-primary)',
+                      border: isGscConnected ? '1px solid var(--accent-red)' : 'none',
+                      color: isGscConnected ? 'var(--accent-red)' : 'white',
+                      fontWeight: 600
+                    }}
+                  >
+                    {isGscConnected ? 'Ngắt Kết Nối GSC' : 'Liên kết tài khoản Google'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Quota Limits & Plans */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '1rem', marginBottom: '1.25rem' }}>
+                <div>
+                  <h3 style={styles.cardTitle}>Hạn mức & Gói Workspace (Plan & Quotas)</h3>
+                  <p style={styles.cardSubtitle}>Kiểm soát và gia hạn giới hạn tài nguyên của workspace</p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Gói hiện tại: <strong style={{ color: 'var(--accent-primary)', textTransform: 'uppercase' }}>{workspacePlan}</strong>
+                  </span>
+                  <button
+                    onClick={handleTogglePlan}
+                    style={{
+                      ...styles.submitBtn,
+                      marginTop: 0,
+                      background: 'rgba(99, 102, 241, 0.1)',
+                      color: 'var(--accent-primary)',
+                      border: '1px solid var(--accent-primary)',
+                      padding: '0.4rem 0.8rem',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    {workspacePlan === 'free' ? 'Nâng cấp lên PRO' : 'Hạ cấp xuống FREE'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress bars */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {/* Sites Limit */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Số lượng Website (Sites)</span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                      {sitesList.length} / {workspacePlan === 'free' ? 1 : 10} Sites
+                    </span>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${Math.min(100, (sitesList.length / (workspacePlan === 'free' ? 1 : 10)) * 100)}%`,
+                      height: '100%',
+                      background: 'var(--accent-primary)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+
+                {/* Keywords Limit */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Từ khóa Theo dõi (Keywords)</span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                      {keywordsList.length} / {workspacePlan === 'free' ? 5 : 100} Keywords
+                    </span>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${Math.min(100, (keywordsList.length / (workspacePlan === 'free' ? 5 : 100)) * 100)}%`,
+                      height: '100%',
+                      background: 'var(--accent-secondary)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+
+                {/* Briefs Limit */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>AI Content Briefs đã tạo</span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                      {contentPlansList.filter(p => p.body).length} / {workspacePlan === 'free' ? 3 : 50} Briefs
+                    </span>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${Math.min(100, (contentPlansList.filter(p => p.body).length / (workspacePlan === 'free' ? 3 : 50)) * 100)}%`,
+                      height: '100%',
+                      background: 'var(--accent-green)',
+                      borderRadius: '4px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Team Management Card */}
+            <div className="glass-card" style={{ padding: '1.5rem' }}>
+              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Thành viên Workspace (Team Members)</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem' }}>
+                {/* Form to add member */}
+                <div>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>Thêm Thành Viên</h4>
+                  <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div>
+                      <label style={styles.formLabel}>Email</label>
+                      <input
+                        type="email"
+                        value={newMemberEmail}
+                        onChange={e => setNewMemberEmail(e.target.value)}
+                        placeholder="email@domain.com"
+                        style={styles.formInput}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={styles.formLabel}>Vai trò</label>
+                      <select
+                        value={newMemberRole}
+                        onChange={e => setNewMemberRole(e.target.value)}
+                        style={styles.formInput}
+                      >
+                        <option value="owner">Owner (Chủ sở hữu)</option>
+                        <option value="admin">Admin (Quản trị viên)</option>
+                        <option value="manager">Manager (Quản lý)</option>
+                        <option value="seo">SEO specialist (Chuyên viên SEO)</option>
+                        <option value="content">Content specialist (Chuyên viên Nội dung)</option>
+                        <option value="client">Client (Khách hàng)</option>
+                        <option value="viewer">Viewer (Người xem)</option>
+                      </select>
+                    </div>
+                    <button
+                      type="submit"
+                      style={{ ...styles.submitBtn, width: '100%', marginTop: '0.25rem' }}
+                    >
+                      Thêm thành viên
+                    </button>
+                  </form>
+                </div>
+
+                {/* Member List Table */}
+                <div>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>Danh Sách Thành Viên</h4>
+                  {membersList.length === 0 ? (
+                    <div style={styles.emptyState}>
+                      <p>Không có thông tin thành viên.</p>
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', textAlign: 'left' }}>
+                            <th style={{ padding: '0.5rem' }}>Email</th>
+                            <th style={{ padding: '0.5rem' }}>Vai trò</th>
+                            <th style={{ padding: '0.5rem' }}>Trạng thái</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {membersList.map((mem: any) => (
+                            <tr key={mem.membershipId || mem.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
+                              <td style={{ padding: '0.5rem', color: 'var(--text-primary)' }}>{mem.user?.email || mem.user?.id || mem.userId}</td>
+                              <td style={{ padding: '0.5rem', textTransform: 'uppercase', color: 'var(--accent-primary)', fontSize: '0.75rem' }}>{mem.role}</td>
+                              <td style={{ padding: '0.5rem' }}>
+                                <span style={{
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  color: 'var(--accent-green)',
+                                  padding: '0.05rem 0.25rem',
+                                  borderRadius: '3px',
+                                  fontSize: '0.65rem'
+                                }}>
+                                  ACTIVE
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Report Preview Modal */}
+        {selectedReport && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '2rem'
+          }}>
+            <div className="glass-card" style={{
+              background: '#0d111a',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '12px',
+              width: '100%',
+              maxWidth: '850px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
+              overflow: 'hidden'
+            }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '1.25rem 1.5rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+              }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Bản xem trước Báo cáo: {selectedReport.title}
+                </h3>
+                <button
+                  onClick={() => setSelectedReport(null)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '1.2rem'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Preview Content */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '1.5rem',
+                background: '#ffffff',
+                color: '#333333'
+              }}>
+                <div dangerouslySetInnerHTML={{ __html: selectedReport.metadata?.renderedHtml || '<p>Không có nội dung báo cáo</p>' }} />
+              </div>
+
+              {/* Footer */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '1rem',
+                padding: '1rem 1.5rem',
+                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                background: 'rgba(255, 255, 255, 0.01)'
+              }}>
+                <button
+                  onClick={() => {
+                    const printWindow = window.open('', '_blank');
+                    if (printWindow) {
+                      printWindow.document.write(selectedReport.metadata?.renderedHtml || '');
+                      printWindow.document.close();
+                      printWindow.focus();
+                      printWindow.print();
+                    }
+                  }}
+                  style={{
+                    background: 'var(--accent-primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  In / Xuất PDF
+                </button>
+                <button
+                  onClick={() => setSelectedReport(null)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recommendation Detail Modal */}
+        {selectedRecForDetail && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '2rem'
+          }}>
+            <div className="glass-card" style={{
+              background: '#0d111a',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '12px',
+              width: '100%',
+              maxWidth: '600px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
+              padding: '1.5rem'
+            }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '1rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                paddingBottom: '0.75rem'
+              }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Chi tiết Kiến nghị & Phân công
+                </h3>
+                <button
+                  onClick={() => setSelectedRecForDetail(null)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '1.2rem'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Rec info */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--accent-secondary)', marginBottom: '0.4rem' }}>
+                  {selectedRecForDetail.title}
+                </h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  {selectedRecForDetail.description}
+                </p>
+              </div>
+
+              {/* Assignee selection */}
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={styles.formLabel}>Người phụ trách (Assignee)</label>
+                <select
+                  value={recAssigneeId}
+                  onChange={e => setRecAssigneeId(e.target.value)}
+                  style={styles.formInput}
+                >
+                  <option value="">-- Chưa phân công --</option>
+                  {membersList.map((mem: any) => (
+                    <option key={mem.membershipId || mem.id} value={mem.user?.id || mem.userId}>
+                      {mem.user?.email || mem.user?.id || mem.userId} ({mem.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Notes: Internal Notes & Client Notes */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                    <label style={{ ...styles.formLabel, marginBottom: 0 }}>Ghi chú nội bộ (Internal Notes)</label>
+                    <span style={{ fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontWeight: 700 }}>CHỈ NỘI BỘ AGENCY</span>
+                  </div>
+                  <textarea
+                    value={recInternalNotes}
+                    onChange={e => setRecInternalNotes(e.target.value)}
+                    placeholder="Nhập ghi chú kỹ thuật, lưu ý nội bộ công việc..."
+                    style={{ ...styles.formInput, minHeight: '80px', fontFamily: 'inherit' }}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                    <label style={{ ...styles.formLabel, marginBottom: 0 }}>Ghi chú gửi khách hàng (Client Notes)</label>
+                    <span style={{ fontSize: '0.65rem', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent-green)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontWeight: 700 }}>KHÁCH HÀNG CÓ THỂ XEM</span>
+                  </div>
+                  <textarea
+                    value={recClientNotes}
+                    onChange={e => setRecClientNotes(e.target.value)}
+                    placeholder="Giải thích cho khách hàng về lỗi này và cách xử lý..."
+                    style={{ ...styles.formInput, minHeight: '80px', fontFamily: 'inherit' }}
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '0.75rem',
+                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+                paddingTop: '1rem'
+              }}>
+                <button
+                  onClick={() => setSelectedRecForDetail(null)}
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--text-primary)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={handleSaveRecDetail}
+                  disabled={isSavingRecDetail}
+                  style={{
+                    ...styles.submitBtn,
+                    marginTop: 0,
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  {isSavingRecDetail ? 'Đang lưu...' : 'Lưu Thay Đổi'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </section>

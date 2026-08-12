@@ -1,9 +1,23 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { db, sites, projects, workspaces } from '@seo/db';
 import { eq, and, count } from 'drizzle-orm';
+import { Queue } from 'bullmq';
 
 @Injectable()
 export class SitesService {
+  private queue: Queue;
+
+  constructor() {
+    const redisHost = process.env.REDIS_HOST || 'localhost';
+    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+    this.queue = new Queue('crawler-queue', {
+      connection: {
+        host: redisHost,
+        port: redisPort,
+      },
+    });
+  }
+
   private async verifyProjectBelongsToWorkspace(workspaceId: string, projectId: string) {
     const projectResult = await db
       .select()
@@ -79,5 +93,42 @@ export class SitesService {
       .where(eq(sites.projectId, projectId));
 
     return results;
+  }
+
+  async triggerCrawl(workspaceId: string, siteId: string) {
+    // 1. Fetch site and verify it belongs to workspace
+    const siteResult = await db
+      .select({
+        id: sites.id,
+        domain: sites.domain,
+        projectId: sites.projectId,
+      })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(
+        and(
+          eq(sites.id, siteId),
+          eq(projects.workspaceId, workspaceId)
+        )
+      )
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    const site = siteResult[0];
+
+    // 2. Enqueue crawl job in BullMQ crawler-queue
+    try {
+      await this.queue.add('crawl.requested', {
+        siteId: site.id,
+        url: `http://${site.domain}`,
+      });
+    } catch (err) {
+      throw new BadRequestException(`Failed to enqueue crawl job: ${err.message}`);
+    }
+
+    return { success: true, siteId: site.id, message: 'Crawl job enqueued successfully' };
   }
 }

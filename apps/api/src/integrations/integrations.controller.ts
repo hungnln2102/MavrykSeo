@@ -29,8 +29,9 @@ export class IntegrationsController {
   }
 
   @Get(':provider')
+  @AuditLog('integration.credentials.read', 'integration')
   @UseGuards(RolesGuard)
-  @Roles('owner', 'admin', 'manager', 'seo')
+  @Roles('owner', 'admin')
   async getIntegration(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,

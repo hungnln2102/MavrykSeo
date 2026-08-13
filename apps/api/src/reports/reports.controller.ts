@@ -5,6 +5,7 @@ import { TenantGuard } from '../tenancy/tenant.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
+import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('projects/:projectId/reports')
 @UseGuards(AuthGuard, TenantGuard)
@@ -20,6 +21,7 @@ export class ReportsController {
   }
 
   @Post()
+  @AuditLog('report.create', 'report')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async createReport(

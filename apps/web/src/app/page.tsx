@@ -242,43 +242,6 @@ export default function Page() {
     initApi();
   }, []);
 
-  // Fetch Topics, Content Plans, Sites, Keywords, Members, Reports when token, workspaceId or projectId change
-  React.useEffect(() => {
-    if (!token || !workspaceId || !projectId) return;
-    fetchTopics();
-    fetchContentPlans();
-    fetchSites();
-    fetchKeywords();
-    fetchMembers();
-    fetchReports();
-    fetchDecayedPlans();
-  }, [token, workspaceId, projectId]);
-
-  // Debounced Real-time Content Optimization
-  React.useEffect(() => {
-    if (!selectedPlanId || !editorBody.trim()) return;
-
-    const timer = setTimeout(() => {
-      runOptimization(selectedPlanId, editorBody);
-    }, 800);
-
-    return () => clearTimeout(timer);
-  }, [editorBody, selectedPlanId]);
-
-  // Fetch performance data when a published content plan is selected
-  React.useEffect(() => {
-    if (selectedPlanId) {
-      const plan = contentPlansList.find(p => p.id === selectedPlanId);
-      if (plan && plan.status === 'published') {
-        fetchPerformanceData(selectedPlanId);
-      } else {
-        setPerformanceData(null);
-      }
-    } else {
-      setPerformanceData(null);
-    }
-  }, [selectedPlanId, contentPlansList]);
-
   const getInternalLinkSuggestions = () => {
     if (!selectedPlanId) return [];
     const currentPlan = contentPlansList.find(p => p.id === selectedPlanId);
@@ -320,7 +283,7 @@ export default function Page() {
       .slice(0, 3);
   };
 
-  async function fetchTopics() {
+  const fetchTopics = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
     try {
       const res = await fetch(`http://localhost:3000/projects/${projectId}/topics`, {
@@ -335,9 +298,9 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching topics:', err);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
-  async function fetchContentPlans() {
+  const fetchContentPlans = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
     try {
       const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans`, {
@@ -352,9 +315,9 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching content plans:', err);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
-  async function fetchSites() {
+  const fetchSites = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
     try {
       const res = await fetch(`http://localhost:3000/sites?projectId=${projectId}`, {
@@ -374,9 +337,9 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching sites:', err);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
-  async function fetchKeywords() {
+  const fetchKeywords = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
     try {
       const res = await fetch(`http://localhost:3000/projects/${projectId}/keywords`, {
@@ -391,7 +354,7 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching keywords:', err);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
   async function handleTriggerCrawl() {
     if (!token || !workspaceId || !activeSite) return;
@@ -515,7 +478,7 @@ export default function Page() {
     }
   }
 
-  async function fetchMembers() {
+  const fetchMembers = React.useCallback(async () => {
     if (!token || !workspaceId) return;
     try {
       const res = await fetch('http://localhost:3000/workspaces/active/members', {
@@ -530,7 +493,7 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching members:', err);
     }
-  }
+  }, [token, workspaceId]);
 
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
@@ -561,7 +524,7 @@ export default function Page() {
     }
   }
 
-  async function fetchReports() {
+  const fetchReports = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
     try {
       const res = await fetch(`http://localhost:3000/projects/${projectId}/reports`, {
@@ -576,7 +539,7 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching reports:', err);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
   async function handleCreateReport(e: React.FormEvent) {
     e.preventDefault();
@@ -792,7 +755,7 @@ export default function Page() {
     }
   }
 
-  async function runOptimization(planId: string, bodyText: string) {
+  const runOptimization = React.useCallback(async (planId: string, bodyText: string) => {
     if (!token || !workspaceId || !projectId) return;
 
     try {
@@ -816,7 +779,7 @@ export default function Page() {
     } finally {
       setIsOptimizing(false);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
   async function handleImportUrl() {
     if (!importUrlStr.trim() || !importKeyword.trim() || !token || !workspaceId || !projectId) {
@@ -894,7 +857,7 @@ export default function Page() {
     }
   }
 
-  async function fetchPerformanceData(planId: string) {
+  const fetchPerformanceData = React.useCallback(async (planId: string) => {
     if (!token || !workspaceId || !projectId) return;
 
     try {
@@ -916,9 +879,9 @@ export default function Page() {
     } finally {
       setLoadingPerformance(false);
     }
-  }
+  }, [token, workspaceId, projectId]);
 
-  async function fetchDecayedPlans() {
+  const fetchDecayedPlans = React.useCallback(async () => {
     if (!token || !workspaceId || !projectId) return;
 
     try {
@@ -938,7 +901,44 @@ export default function Page() {
     } finally {
       setLoadingDecay(false);
     }
-  }
+  }, [token, workspaceId, projectId]);
+
+  // Fetch Topics, Content Plans, Sites, Keywords, Members, Reports when token, workspaceId or projectId change
+  React.useEffect(() => {
+    if (!token || !workspaceId || !projectId) return;
+    fetchTopics();
+    fetchContentPlans();
+    fetchSites();
+    fetchKeywords();
+    fetchMembers();
+    fetchReports();
+    fetchDecayedPlans();
+  }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans]);
+
+  // Debounced Real-time Content Optimization
+  React.useEffect(() => {
+    if (!selectedPlanId || !editorBody.trim()) return;
+
+    const timer = setTimeout(() => {
+      runOptimization(selectedPlanId, editorBody);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [editorBody, selectedPlanId, runOptimization]);
+
+  // Fetch performance data when a published content plan is selected
+  React.useEffect(() => {
+    if (selectedPlanId) {
+      const plan = contentPlansList.find(p => p.id === selectedPlanId);
+      if (plan && plan.status === 'published') {
+        fetchPerformanceData(selectedPlanId);
+      } else {
+        setPerformanceData(null);
+      }
+    } else {
+      setPerformanceData(null);
+    }
+  }, [selectedPlanId, contentPlansList, fetchPerformanceData]);
 
   async function handleRefreshContent(planId: string) {
     if (!token || !workspaceId || !projectId) return;
@@ -2021,7 +2021,7 @@ export default function Page() {
                       <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', alignItems: 'start' }}>
                         {/* Keyword Metrics */}
                         <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Metrics for "{keywordResearchResult.keyword}"</h4>
+                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Metrics for &quot;{keywordResearchResult.keyword}&quot;</h4>
                           
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
@@ -2310,7 +2310,7 @@ export default function Page() {
                         </div>
                       ) : competitorGapResult.length === 0 ? (
                         <div style={styles.emptyState}>
-                          <p>No content gaps detected. Click "Run Analysis" to query competitor data from ClickHouse.</p>
+                          <p>No content gaps detected. Click &quot;Run Analysis&quot; to query competitor data from ClickHouse.</p>
                         </div>
                       ) : (
                         <div style={styles.tableWrapper}>
@@ -2813,7 +2813,7 @@ export default function Page() {
                                         </span>
                                       </div>
                                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem' }}>
-                                        <span style={{ color: 'var(--text-muted)' }}>Anchor: "{link.keyword}"</span>
+                                        <span style={{ color: 'var(--text-muted)' }}>Anchor: &quot;{link.keyword}&quot;</span>
                                         <a href={link.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600 }}>
                                           Copy Link
                                         </a>

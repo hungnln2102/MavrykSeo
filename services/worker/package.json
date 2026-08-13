@@ -7,7 +7,8 @@
     "start": "nest start --builder webpack",
     "dev": "node --watch -r ts-node/register -r tsconfig-paths/register src/main.ts",
     "start:prod": "node dist/main",
-    "test:detectors": "node verify_ai_detectors.js"
+    "test:detectors": "node verify_ai_detectors.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",

@@ -6,6 +6,7 @@ import { CurrentWorkspace, CurrentRole } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { UserRole } from '@seo/core';
+import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('recommendations')
 @UseGuards(AuthGuard, TenantGuard)
@@ -25,6 +26,7 @@ export class RecommendationsController {
   }
 
   @Patch(':id/status')
+  @AuditLog('recommendation.status.update', 'recommendation')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo', 'content')
   async updateStatus(
@@ -39,6 +41,7 @@ export class RecommendationsController {
   }
 
   @Patch(':id/assignee')
+  @AuditLog('recommendation.assignee.update', 'recommendation')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async updateAssignee(
@@ -50,6 +53,7 @@ export class RecommendationsController {
   }
 
   @Patch(':id/notes')
+  @AuditLog('recommendation.notes.update', 'recommendation')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo', 'content')
   async updateNotes(

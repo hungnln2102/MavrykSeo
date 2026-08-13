@@ -3,12 +3,13 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
+import { getJwtSecret } from '../config/runtime-secrets';
 
 @Module({
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || 'dev_secret_key_12345',
+      secret: getJwtSecret(),
       signOptions: { expiresIn: '7d' },
     }),
   ],

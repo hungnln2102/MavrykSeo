@@ -1,12 +1,18 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { Worker, Job } from 'bullmq';
+import { Worker, Job, UnrecoverableError } from 'bullmq';
 import { clickhouse } from '@seo/clickhouse';
+import { db, ingestionFences, jobRuns, projects } from '@seo/db';
+import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
+import { isRetryableJobError, isValidJobEnvelope, JobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
+import { jobDeadLetterCounter } from './metrics';
 
-interface SerpJobData {
+interface SerpJobData extends JobEnvelope {
+  workspaceId: string;
   projectId: string;
   query: string;
   numResults?: number;
+  ingestionKey?: string;
 }
 
 @Injectable()
@@ -27,8 +33,17 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker(
       'collector-queue',
       async (job: Job<SerpJobData>) => {
-        if (job.name === 'serp.requested' || job.name === 'rank.requested') {
-          await this.handleSerpJob(job);
+        try {
+          if (job.name === 'serp.requested' || job.name === 'rank.requested') {
+            await this.markActive(job);
+            await this.handleSerpJob(job);
+          }
+        } catch (error) {
+          if (!isRetryableJobError(error)) {
+            throw new UnrecoverableError(error instanceof Error ? error.message : 'Non-retryable SERP job failure');
+          }
+
+          throw error;
         }
       },
       {
@@ -40,11 +55,15 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.worker.on('completed', (job) => {
+    this.worker.on('completed', async (job) => {
+      await this.markCompleted(job);
       console.log(`Collector job ${job.id} completed successfully.`);
     });
 
-    this.worker.on('failed', (job, err) => {
+    this.worker.on('failed', async (job, err) => {
+      if (job && this.isFinalFailure(job, err)) {
+        await this.markFailed(job, err);
+      }
       console.error(`Collector job ${job?.id} failed with error:`, err);
     });
   }
@@ -57,11 +76,24 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleSerpJob(job: Job<SerpJobData>) {
-    const { projectId, query, numResults } = job.data;
+    const { workspaceId, projectId, query, numResults } = job.data;
     console.log(`Processing SERP collection job ${job.id} for project: ${projectId}, query: ${query}`);
 
-    if (!projectId || !query) {
-      throw new Error('Invalid SERP job data: projectId and query are required');
+    if (!isValidJobEnvelope(job.data) || !workspaceId || !projectId || !query) {
+      throw nonRetryableJobError(
+        'invalid_payload',
+        'Invalid SERP job data: schema version, correlation ID, idempotency key, workspaceId, projectId, and query are required',
+      );
+    }
+
+    const projectResult = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (projectResult.length === 0) {
+      throw nonRetryableJobError('tenant_scope_violation', 'SERP job project does not belong to the requested workspace');
     }
 
     // 1. Invoke Go Collector Service
@@ -112,16 +144,123 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
       };
     });
 
+    const shouldWriteObservations = await this.acquireIngestionFence(job);
+    if (!shouldWriteObservations) {
+      console.log(`SERP ingestion already completed for key ${job.data.ingestionKey || job.data.idempotencyKey}.`);
+      return;
+    }
+
     try {
       await clickhouse.insert({
         table: `${clickhouseDb}.rank_observations`,
         values: observations,
         format: 'JSONEachRow',
       });
+      await this.completeIngestionFence(job);
       console.log(`Inserted ${observations.length} rank observations to ClickHouse for project: ${projectId}`);
     } catch (error) {
       console.error(`Failed to insert rank observations to ClickHouse:`, error.message);
       throw error;
     }
+  }
+
+  private async markActive(job: Job<SerpJobData>) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'active',
+      attemptCount: job.attemptsMade + 1,
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async acquireIngestionFence(job: Job<SerpJobData>) {
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
+    const [createdFence] = await db.insert(ingestionFences).values({
+      workspaceId: job.data.workspaceId,
+      ingestionKey,
+      ownerIdempotencyKey: job.data.idempotencyKey,
+      state: 'writing',
+    }).onConflictDoNothing().returning();
+
+    if (createdFence) {
+      await this.markIngestionState(job, 'writing', { ingestionStartedAt: new Date() });
+      return true;
+    }
+
+    const existing = await db.select({ state: ingestionFences.state })
+      .from(ingestionFences)
+      .where(and(eq(ingestionFences.workspaceId, job.data.workspaceId), eq(ingestionFences.ingestionKey, ingestionKey)))
+      .limit(1);
+
+    if (existing[0]?.state === 'completed') {
+      await this.markIngestionState(job, 'completed', { ingestionCompletedAt: new Date() });
+      return false;
+    }
+
+    await this.markIngestionState(job, 'reconciliation_required');
+
+    throw nonRetryableJobError(
+      'ingestion_reconciliation_required',
+      'SERP ingestion fence is incomplete; operator reconciliation is required before another write',
+    );
+  }
+
+  private async completeIngestionFence(job: Job<SerpJobData>) {
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
+    await db.update(ingestionFences).set({
+      state: 'completed',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(ingestionFences.workspaceId, job.data.workspaceId), eq(ingestionFences.ingestionKey, ingestionKey)));
+    await this.markIngestionState(job, 'completed', { ingestionCompletedAt: new Date() });
+  }
+
+  private async markIngestionState(
+    job: Job<SerpJobData>,
+    ingestionState: string,
+    timestamps: { ingestionStartedAt?: Date; ingestionCompletedAt?: Date } = {},
+  ) {
+    await db.update(jobRuns).set({
+      ingestionState,
+      ...timestamps,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async markCompleted(job: Job<SerpJobData>) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'completed',
+      completedAt: new Date(),
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async markFailed(job: Job<SerpJobData>, error: Error) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'dead_lettered',
+      attemptCount: job.attemptsMade,
+      errorCode: error instanceof JobProcessingError ? error.code : 'unexpected_failure',
+      errorMessage: 'SERP job failed; inspect safe worker logs with the correlation ID',
+      failedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+    jobDeadLetterCounter.inc({
+      queue: 'collector-queue',
+      job_name: job.name,
+      error_code: error instanceof JobProcessingError ? error.code : 'unexpected_failure',
+    });
+  }
+
+  private isFinalFailure(job: Job<SerpJobData>, error: Error) {
+    return error instanceof UnrecoverableError || job.attemptsMade >= (job.opts.attempts || 1);
   }
 }

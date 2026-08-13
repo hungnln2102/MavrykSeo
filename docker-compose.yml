@@ -156,6 +156,7 @@ services:
       - "9090:9090"
     volumes:
       - ./infra/docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infra/docker/prometheus-rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     depends_on:
       - api

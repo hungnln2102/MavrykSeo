@@ -5,6 +5,7 @@ import { TenantGuard } from '../tenancy/tenant.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
+import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('projects/:projectId')
 @UseGuards(AuthGuard, TenantGuard)
@@ -22,6 +23,7 @@ export class ContentController {
   }
 
   @Post('topics')
+  @AuditLog('content.topic.create', 'topic')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async createTopic(
@@ -49,6 +51,7 @@ export class ContentController {
   }
 
   @Post('content-plans')
+  @AuditLog('content.plan.create', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async createContentPlan(
@@ -68,6 +71,7 @@ export class ContentController {
   }
 
   @Patch('content-plans/:id')
+  @AuditLog('content.plan.update', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async updateContentPlan(
@@ -90,6 +94,7 @@ export class ContentController {
   }
 
   @Post('content-plans/import-url')
+  @AuditLog('content.plan.import_url', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async importUrl(
@@ -124,6 +129,7 @@ export class ContentController {
   }
 
   @Post('content-plans/:id/refresh')
+  @AuditLog('content.plan.refresh', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async refreshContentPlan(
@@ -137,6 +143,7 @@ export class ContentController {
   // --- AI Briefs ---
 
   @Post('content-plans/:id/brief')
+  @AuditLog('content.brief.generate', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async generateBrief(
@@ -157,6 +164,7 @@ export class ContentController {
   }
 
   @Post('content-plans/:id/optimize')
+  @AuditLog('content.plan.optimize', 'content_plan')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async optimizeContent(

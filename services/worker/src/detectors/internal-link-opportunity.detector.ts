@@ -32,7 +32,7 @@ export class InternalLinkOpportunityDetector {
 
   static async detect(projectId: string, siteId: string, siteDomain: string): Promise<InternalLinkOpportunitySignal[]> {
     const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
-    const bucketName = process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
 
     // 1. Get all keywords ranking in the top 20 for this project
     const rankQuery = `

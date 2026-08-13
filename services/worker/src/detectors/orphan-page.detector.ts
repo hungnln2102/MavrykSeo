@@ -30,7 +30,7 @@ export class OrphanPageDetector {
 
   static async detect(siteId: string, siteDomain: string): Promise<OrphanPageSignal[]> {
     const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
-    const bucketName = process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
 
     // 1. Get all crawled pages for the site in the last 24h from ClickHouse
     const query = `

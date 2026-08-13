@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { db, keywords, projects } from '@seo/db';
+import { db, jobRuns, keywords, projects } from '@seo/db';
 import { clickhouse } from '@seo/clickhouse';
 import { eq, and } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { MetricsService } from '../metrics/metrics.service';
+import { createJobEnvelope } from '@seo/core';
 
 @Injectable()
 export class KeywordsService {
@@ -68,14 +69,61 @@ export class KeywordsService {
 
     // 3. Trigger immediate rank tracking job in BullMQ
     if (this.queue) {
-      try {
-        await this.queue.add('rank.requested', {
+      const envelope = createJobEnvelope('rank.requested', [workspaceId, projectId, keywordLower]);
+        const jobData = {
+          ...envelope,
+          workspaceId,
           projectId,
           query: keywordLower,
           numResults: 20,
+          ingestionKey: envelope.idempotencyKey,
+      };
+      let jobRunRecorded = false;
+
+      try {
+        await db.insert(jobRuns).values({
+          workspaceId,
+          projectId,
+          queueName: 'collector-queue',
+          jobName: 'rank.requested',
+          bullmqJobId: envelope.idempotencyKey,
+          idempotencyKey: envelope.idempotencyKey,
+          correlationId: envelope.correlationId,
+          state: 'queued',
+          attemptCount: 0,
+          maxAttempts: 3,
+          ingestionKey: envelope.idempotencyKey,
+          payload: jobData,
+        }).onConflictDoUpdate({
+          target: [jobRuns.workspaceId, jobRuns.idempotencyKey],
+          set: {
+            state: 'queued',
+            errorCode: null,
+            errorMessage: null,
+            failedAt: null,
+            updatedAt: new Date(),
+          },
+        });
+        jobRunRecorded = true;
+
+        await this.queue.add('rank.requested', jobData, {
+          jobId: envelope.idempotencyKey,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: 1000,
+          removeOnFail: 5000,
         });
       } catch (err) {
-        console.error('Failed to enqueue rank.requested job:', err.message);
+        if (jobRunRecorded) {
+          await db.update(jobRuns).set({
+            state: 'failed',
+            errorCode: 'queue_dispatch_failed',
+            errorMessage: 'Unable to dispatch rank job to the queue',
+            failedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(and(eq(jobRuns.workspaceId, workspaceId), eq(jobRuns.idempotencyKey, envelope.idempotencyKey)));
+        }
+        console.error('Failed to enqueue rank.requested job:', err instanceof Error ? err.message : 'Unknown error');
       }
     }
 
@@ -243,6 +291,16 @@ export class KeywordsService {
   }
 
   async clusterKeywords(workspaceId: string, projectId: string, keywordStrings: string[]) {
+    const projectResult = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (projectResult.length === 0) {
+      throw new NotFoundException('Project not found');
+    }
+
     if (!keywordStrings || keywordStrings.length === 0) {
       return [];
     }

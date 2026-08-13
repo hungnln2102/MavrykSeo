@@ -15,6 +15,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { AuditLogInterceptor } from './tenancy/audit-log.interceptor';
 import { TerminusModule } from '@nestjs/terminus';
 import { MetricsModule } from './metrics/metrics.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MetricsModule } from './metrics/metrics.module';
     IntegrationsModule,
     TerminusModule,
     MetricsModule,
+    JobsModule,
     ThrottlerModule.forRoot([
       {
         name: 'short',

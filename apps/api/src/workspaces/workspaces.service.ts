@@ -110,11 +110,11 @@ export class WorkspacesService {
     return newMembership;
   }
 
-  async updateWorkspaceStatus(id: string, status: string) {
+  async updateWorkspaceStatus(workspaceId: string, status: string) {
     const [updated] = await db
       .update(workspaces)
       .set({ status, updatedAt: new Date() })
-      .where(eq(workspaces.id, id))
+      .where(eq(workspaces.id, workspaceId))
       .returning();
 
     if (!updated) {
@@ -123,11 +123,11 @@ export class WorkspacesService {
     return updated;
   }
 
-  async updateWorkspacePlan(id: string, plan: string) {
+  async updateWorkspacePlan(workspaceId: string, plan: string) {
     const [updated] = await db
       .update(workspaces)
       .set({ plan, updatedAt: new Date() })
-      .where(eq(workspaces.id, id))
+      .where(eq(workspaces.id, workspaceId))
       .returning();
 
     if (!updated) {

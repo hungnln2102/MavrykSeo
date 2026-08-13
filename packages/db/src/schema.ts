@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, unique, jsonb, integer } from 'drizzle-orm/pg-core';
+import { boolean, index, pgTable, text, timestamp, uuid, unique, jsonb, integer } from 'drizzle-orm/pg-core';
 import { UserRole } from '@seo/core';
 
 export const users = pgTable('users', {
@@ -17,6 +17,8 @@ export const workspaces = pgTable('workspaces', {
   slug: text('slug').notNull().unique(),
   plan: text('plan').default('free').notNull(),
   status: text('status').default('active').notNull(),
+  crawlEnabled: boolean('crawl_enabled').default(true).notNull(),
+  crawlMaxConcurrentJobs: integer('crawl_max_concurrent_jobs').default(2).notNull(),
   whiteLabelLogo: text('white_label_logo'),
   whiteLabelColors: jsonb('white_label_colors'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -42,6 +44,8 @@ export const projects = pgTable('projects', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
+  crawlEnabled: boolean('crawl_enabled').default(true).notNull(),
+  crawlMaxConcurrentJobs: integer('crawl_max_concurrent_jobs'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -52,6 +56,7 @@ export const sites = pgTable('sites', {
   id: uuid('id').defaultRandom().primaryKey(),
   projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   domain: text('domain').notNull(),
+  crawlScheduleMinutes: integer('crawl_schedule_minutes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
@@ -179,3 +184,53 @@ export const auditLogs = pgTable('audit_logs', {
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
 
+export const jobRuns = pgTable('job_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  queueName: text('queue_name').notNull(),
+  jobName: text('job_name').notNull(),
+  bullmqJobId: text('bullmq_job_id').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  correlationId: text('correlation_id').notNull(),
+  state: text('state').default('queued').notNull(),
+  attemptCount: integer('attempt_count').default(0).notNull(),
+  maxAttempts: integer('max_attempts').notNull(),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  replayOfJobRunId: uuid('replay_of_job_run_id'),
+  ingestionState: text('ingestion_state').default('pending').notNull(),
+  ingestionKey: text('ingestion_key').notNull(),
+  ingestionStartedAt: timestamp('ingestion_started_at'),
+  ingestionCompletedAt: timestamp('ingestion_completed_at'),
+  payload: jsonb('payload').notNull(),
+  completedAt: timestamp('completed_at'),
+  failedAt: timestamp('failed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqWorkspaceIdempotency: unique('uniq_job_runs_workspace_idempotency').on(table.workspaceId, table.idempotencyKey),
+  workspaceStateIdx: index('job_runs_workspace_state_idx').on(table.workspaceId, table.state),
+  projectStateIdx: index('job_runs_project_state_idx').on(table.projectId, table.state),
+  replayOfIdx: index('job_runs_replay_of_idx').on(table.replayOfJobRunId),
+  ingestionKeyIdx: index('job_runs_ingestion_key_idx').on(table.workspaceId, table.ingestionKey),
+}));
+export type JobRun = typeof jobRuns.$inferSelect;
+export type NewJobRun = typeof jobRuns.$inferInsert;
+
+
+export const ingestionFences = pgTable('ingestion_fences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  ingestionKey: text('ingestion_key').notNull(),
+  ownerIdempotencyKey: text('owner_idempotency_key').notNull(),
+  state: text('state').default('writing').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqWorkspaceIngestionKey: unique('uniq_ingestion_fences_workspace_key').on(table.workspaceId, table.ingestionKey),
+  workspaceStateIdx: index('ingestion_fences_workspace_state_idx').on(table.workspaceId, table.state),
+}));
+export type IngestionFence = typeof ingestionFences.$inferSelect;
+export type NewIngestionFence = typeof ingestionFences.$inferInsert;

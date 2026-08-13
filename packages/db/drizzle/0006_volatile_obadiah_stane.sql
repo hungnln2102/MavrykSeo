@@ -1,0 +1,2 @@
+ALTER TABLE "job_runs" ADD COLUMN IF NOT EXISTS "replay_of_job_run_id" uuid;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "job_runs_replay_of_idx" ON "job_runs" USING btree ("replay_of_job_run_id");

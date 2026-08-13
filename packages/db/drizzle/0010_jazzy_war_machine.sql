@@ -1,0 +1,1 @@
+ALTER TABLE "sites" ADD COLUMN IF NOT EXISTS "crawl_schedule_minutes" integer;

@@ -4,6 +4,7 @@ import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { AppModule } from './app.module';
+import { validateRuntimeSecrets } from './config/runtime-secrets';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -17,6 +18,7 @@ if (process.env.SENTRY_DSN) {
 }
 
 async function bootstrap() {
+  validateRuntimeSecrets();
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ trustProxy: true })

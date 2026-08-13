@@ -38,6 +38,7 @@ export class SitesController {
   }
 
   @Post(':siteId/crawl')
+  @AuditLog('site.crawl.request', 'site')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'seo')
   async triggerCrawl(
@@ -45,5 +46,21 @@ export class SitesController {
     @Param('siteId') siteId: string,
   ) {
     return this.sitesService.triggerCrawl(workspaceId, siteId);
+  }
+
+  @Post(':siteId/crawl-schedule')
+  @AuditLog('site.crawl.schedule.update', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async updateCrawlSchedule(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+    @Body() body: { crawlScheduleMinutes?: number | null },
+  ) {
+    if (body.crawlScheduleMinutes !== null && body.crawlScheduleMinutes !== undefined
+      && (!Number.isInteger(body.crawlScheduleMinutes) || body.crawlScheduleMinutes < 60)) {
+      throw new BadRequestException('crawlScheduleMinutes must be null or an integer of at least 60 minutes');
+    }
+    return this.sitesService.updateCrawlSchedule(workspaceId, siteId, body.crawlScheduleMinutes ?? null);
   }
 }

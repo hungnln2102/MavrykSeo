@@ -48,4 +48,6 @@ export const CanonicalEvents = {
 
 export type CanonicalEvent = typeof CanonicalEvents[keyof typeof CanonicalEvents];
 
-export * from './crypto.js';
+export * from './crypto';
+
+export * from './jobs';

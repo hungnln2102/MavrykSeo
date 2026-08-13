@@ -1,28 +1,33 @@
 {
-  "name": "seo-ai-platform",
-  "private": true,
-  "packageManager": "pnpm@11.21.0",
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "scripts": {
-    "build": "turbo run build",
-    "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "clean": "turbo run clean && rimraf node_modules"
-  },
-  "devDependencies": {
-    "turbo": "^2.0.14",
-    "typescript": "^5.5.4",
-    "prettier": "^3.3.3",
-    "eslint": "^9.9.0",
-    "rimraf": "^6.0.1"
-  },
-  "overrides": {
-    "drizzle-orm": "^0.33.0"
-  }
+    "name":  "seo-ai-platform",
+    "private":  true,
+    "packageManager":  "pnpm@11.21.0",
+    "engines":  {
+                    "node":  "\u003e=18.0.0"
+                },
+    "scripts":  {
+                    "build":  "turbo run build",
+                    "dev":  "turbo run dev",
+                    "lint":  "turbo run lint",
+                    "typecheck":  "turbo run typecheck",
+                    "test":  "turbo run test",
+                    "clean":  "turbo run clean \u0026\u0026 rimraf node_modules",
+                    "db:generate":  "pnpm --filter @seo/db run db:generate",
+                    "db:migrate":  "pnpm --filter @seo/db run db:migrate",
+                    "db:check":  "pnpm --filter @seo/db run db:check",
+                    "test:integration":  "pnpm --filter worker run test:detectors",
+                    "local:up":  "docker compose up -d postgres clickhouse redis minio",
+                    "local:down":  "docker compose down",
+                    "db:seed":  "pnpm --filter @seo/db run db:seed"
+                },
+    "devDependencies":  {
+                            "eslint":  "^8.57.0",
+                            "prettier":  "^3.3.3",
+                            "rimraf":  "^6.0.1",
+                            "turbo":  "^2.0.14",
+                            "typescript":  "^5.5.4"
+                        },
+    "overrides":  {
+                      "drizzle-orm":  "^0.33.0"
+                  }
 }
-
-

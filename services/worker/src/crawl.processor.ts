@@ -1,17 +1,23 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { Worker, Job } from 'bullmq';
+import { Worker, Job, UnrecoverableError } from 'bullmq';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import * as crypto from 'crypto';
 import { clickhouse } from '@seo/clickhouse';
-import { db, sites } from '@seo/db';
-import { eq } from 'drizzle-orm';
+import { db, ingestionFences, jobRuns, projects, sites, workspaces } from '@seo/db';
+import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
-import { crawlSuccessCounter } from './metrics';
+import { crawlSuccessCounter, jobDeadLetterCounter } from './metrics';
+import { isRetryableJobError, isValidJobEnvelope, JobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
 
-interface CrawlJobData {
+interface CrawlJobData extends JobEnvelope {
+  workspaceId: string;
   siteId: string;
-  url: string;
   userAgent?: string;
+  ingestionKey?: string;
+}
+
+function isCrawlKillSwitchEnabled(): boolean {
+  return process.env.CRAWL_KILL_SWITCH?.trim().toLowerCase() === 'true';
 }
 
 @Injectable()
@@ -21,7 +27,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
   private crawlerApiUrl: string;
 
   constructor() {
-    this.crawlerApiUrl = process.env.CRAWLER_API_URL || 'http://localhost:8081/crawl';
+    this.crawlerApiUrl = process.env.CRAWLER_API_URL || process.env.CRAWLER_SERVICE_URL || 'http://localhost:8081/crawl';
     
     this.s3Client = new S3Client({
       endpoint: process.env.S3_ENDPOINT || 'http://localhost:9002',
@@ -43,7 +49,16 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
     this.worker = new Worker(
       'crawler-queue',
       async (job: Job<CrawlJobData>) => {
-        await this.handleCrawlJob(job);
+        try {
+          await this.markActive(job);
+          await this.handleCrawlJob(job);
+        } catch (error) {
+          if (!isRetryableJobError(error)) {
+            throw new UnrecoverableError(error instanceof Error ? error.message : 'Non-retryable crawl job failure');
+          }
+
+          throw error;
+        }
       },
       {
         connection: {
@@ -54,11 +69,15 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.worker.on('completed', (job) => {
+    this.worker.on('completed', async (job) => {
+      await this.markCompleted(job);
       console.log(`Job ${job.id} completed successfully.`);
     });
 
-    this.worker.on('failed', (job, err) => {
+    this.worker.on('failed', async (job, err) => {
+      if (job && this.isFinalFailure(job, err)) {
+        await this.markFailed(job, err);
+      }
       console.error(`Job ${job?.id} failed with error:`, err);
     });
   }
@@ -71,12 +90,42 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleCrawlJob(job: Job<CrawlJobData>) {
-    const { siteId, url, userAgent } = job.data;
-    console.log(`Processing crawl job ${job.id} for site: ${siteId}, URL: ${url}`);
+    const { workspaceId, siteId, userAgent } = job.data;
 
-    if (!siteId || !url) {
-      throw new Error('Invalid crawl job data: siteId and url are required');
+    if (!isValidJobEnvelope(job.data) || !workspaceId || !siteId) {
+      throw nonRetryableJobError(
+        'invalid_payload',
+        'Invalid crawl job data: schema version, correlation ID, idempotency key, workspaceId, and siteId are required',
+      );
     }
+
+    if (isCrawlKillSwitchEnabled()) {
+      throw nonRetryableJobError('crawl_disabled', 'Crawling is temporarily disabled by an operator');
+    }
+
+    const siteResult = await db
+      .select({
+        id: sites.id,
+        domain: sites.domain,
+        workspaceCrawlEnabled: workspaces.crawlEnabled,
+        projectCrawlEnabled: projects.crawlEnabled,
+      })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .innerJoin(workspaces, eq(projects.workspaceId, workspaces.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw nonRetryableJobError('tenant_scope_violation', 'Crawl job site does not belong to the requested workspace');
+    }
+
+    if (!siteResult[0].workspaceCrawlEnabled || !siteResult[0].projectCrawlEnabled) {
+      throw nonRetryableJobError('crawl_disabled', 'Crawling is disabled for this workspace or project');
+    }
+
+    const url = `http://${siteResult[0].domain}`;
+    console.log(`Processing crawl job ${job.id} for site: ${siteId}`);
 
     // 1. Invoke Go Crawler Service
     let crawlResult;
@@ -161,24 +210,49 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
 
     console.log(`Successfully crawled ${url}. Status: ${crawlResult.statusCode}, wordCount: ${crawlResult.wordCount}`);
 
-    // 2. Upload raw HTML to MinIO S3
-    const bucketName = process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    // Acquire the durable fence before any raw or normalized writes so a replay
+    // cannot overwrite an immutable artifact or duplicate historical facts.
+    const shouldWriteObservation = await this.acquireIngestionFence(job);
+    if (!shouldWriteObservation) {
+      console.log(`Crawl ingestion already completed for key ${job.data.ingestionKey || job.data.idempotencyKey}.`);
+      return;
+    }
+
+    // 2. Store an immutable raw artifact before normalizing it into ClickHouse.
+    // The run-scoped key preserves historical evidence; the legacy latest key only
+    // supports detectors that have not yet been migrated to artifact references.
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
     const urlHash = crypto.createHash('sha256').update(url).digest('hex');
-    const s3Key = `crawl/${siteId}/${urlHash}.html`;
+    const rawArtifactKey = `raw/crawl/${workspaceId}/${siteId}/${ingestionKey}/${urlHash}.html`;
+    const latestArtifactKey = `crawl/${siteId}/${urlHash}.html`;
 
     try {
       await this.s3Client.send(
         new PutObjectCommand({
           Bucket: bucketName,
-          Key: s3Key,
+          Key: rawArtifactKey,
+          Body: crawlResult.rawHtml || '',
+          ContentType: 'text/html',
+          Metadata: {
+            workspace_id: workspaceId,
+            site_id: siteId,
+            ingestion_key: ingestionKey,
+          },
+        }),
+      );
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: latestArtifactKey,
           Body: crawlResult.rawHtml || '',
           ContentType: 'text/html',
         }),
       );
-      console.log(`Uploaded raw HTML to S3: ${s3Key}`);
+      console.log(`Stored raw crawl artifact for site ${siteId} with correlation ${job.data.correlationId}`);
     } catch (error) {
-      console.error(`Failed to upload raw HTML to S3:`, error.message);
-      // We don't fail the whole job if S3 fails, but log it
+      console.error(`Failed to store raw crawl artifact for correlation ${job.data.correlationId}:`, error.message);
+      throw error;
     }
 
     // 3. Write observations to ClickHouse
@@ -265,6 +339,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
         ],
         format: 'JSONEachRow',
       });
+      await this.completeIngestionFence(job);
       console.log(`Inserted crawl observation to ClickHouse for site: ${siteId}`);
     } catch (error) {
       console.error(`Failed to insert to ClickHouse:`, error.message);
@@ -282,5 +357,105 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       console.error(`Failed to update PostgreSQL site record:`, error.message);
     }
+  }
+
+  private async markActive(job: Job<CrawlJobData>) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'active',
+      attemptCount: job.attemptsMade + 1,
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async acquireIngestionFence(job: Job<CrawlJobData>) {
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
+    const [createdFence] = await db.insert(ingestionFences).values({
+      workspaceId: job.data.workspaceId,
+      ingestionKey,
+      ownerIdempotencyKey: job.data.idempotencyKey,
+      state: 'writing',
+    }).onConflictDoNothing().returning();
+
+    if (createdFence) {
+      await this.markIngestionState(job, 'writing', { ingestionStartedAt: new Date() });
+      return true;
+    }
+
+    const existing = await db.select({ state: ingestionFences.state })
+      .from(ingestionFences)
+      .where(and(eq(ingestionFences.workspaceId, job.data.workspaceId), eq(ingestionFences.ingestionKey, ingestionKey)))
+      .limit(1);
+
+    if (existing[0]?.state === 'completed') {
+      await this.markIngestionState(job, 'completed', { ingestionCompletedAt: new Date() });
+      return false;
+    }
+
+    await this.markIngestionState(job, 'reconciliation_required');
+
+    throw nonRetryableJobError(
+      'ingestion_reconciliation_required',
+      'Crawl ingestion fence is incomplete; operator reconciliation is required before another write',
+    );
+  }
+
+  private async completeIngestionFence(job: Job<CrawlJobData>) {
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
+    await db.update(ingestionFences).set({
+      state: 'completed',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(ingestionFences.workspaceId, job.data.workspaceId), eq(ingestionFences.ingestionKey, ingestionKey)));
+    await this.markIngestionState(job, 'completed', { ingestionCompletedAt: new Date() });
+  }
+
+  private async markIngestionState(
+    job: Job<CrawlJobData>,
+    ingestionState: string,
+    timestamps: { ingestionStartedAt?: Date; ingestionCompletedAt?: Date } = {},
+  ) {
+    await db.update(jobRuns).set({
+      ingestionState,
+      ...timestamps,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async markCompleted(job: Job<CrawlJobData>) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'completed',
+      completedAt: new Date(),
+      errorCode: null,
+      errorMessage: null,
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+  }
+
+  private async markFailed(job: Job<CrawlJobData>, error: Error) {
+    if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
+
+    await db.update(jobRuns).set({
+      state: 'dead_lettered',
+      attemptCount: job.attemptsMade,
+      errorCode: error instanceof JobProcessingError ? error.code : 'unexpected_failure',
+      errorMessage: 'Crawl job failed; inspect safe worker logs with the correlation ID',
+      failedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
+    jobDeadLetterCounter.inc({
+      queue: 'crawler-queue',
+      job_name: job.name,
+      error_code: error instanceof JobProcessingError ? error.code : 'unexpected_failure',
+    });
+  }
+
+  private isFinalFailure(job: Job<CrawlJobData>, error: Error) {
+    return error instanceof UnrecoverableError || job.attemptsMade >= (job.opts.attempts || 1);
   }
 }

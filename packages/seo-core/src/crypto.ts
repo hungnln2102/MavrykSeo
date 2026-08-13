@@ -1,7 +1,21 @@
 import * as crypto from 'crypto';
 
-function getEncryptionKey(secretKeyHex?: string): Buffer {
-  const rawKey = secretKeyHex || process.env.ENCRYPTION_KEY || 'default-dev-encryption-key-change-it-in-prod-12345';
+function getEncryptionKeyMaterial(secretKey?: string): string {
+  const rawKey = secretKey || process.env.GSC_TOKEN_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+
+  if (!rawKey) {
+    throw new Error('GSC_TOKEN_ENCRYPTION_KEY or ENCRYPTION_KEY must be configured before encrypting credentials.');
+  }
+
+  return rawKey;
+}
+
+export function validateEncryptionConfiguration(): void {
+  getEncryptionKeyMaterial();
+}
+
+function getEncryptionKey(secretKey?: string): Buffer {
+  const rawKey = getEncryptionKeyMaterial(secretKey);
   // If it's a 64-character hex string representing 32 bytes, use it directly
   if (/^[0-9a-fA-F]{64}$/.test(rawKey)) {
     return Buffer.from(rawKey, 'hex');
@@ -9,7 +23,6 @@ function getEncryptionKey(secretKeyHex?: string): Buffer {
   // Otherwise, hash the key string to derive a secure 32-byte key
   return crypto.createHash('sha256').update(rawKey).digest();
 }
-
 export function encryptToken(text: string, secretKeyHex?: string): string {
   const key = getEncryptionKey(secretKeyHex);
   const iv = crypto.randomBytes(12);

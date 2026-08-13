@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -22,20 +25,101 @@ import (
 	"golang.org/x/net/html"
 )
 
+const (
+	maxRequestBodyBytes            int64 = 8 * 1024
+	maxCrawlBodyBytes              int64 = 5 * 1024 * 1024
+	maxSitemapBodyBytes            int64 = 10 * 1024 * 1024
+	defaultCircuitFailureThreshold       = 5
+	defaultCircuitCooldown               = time.Minute
+)
+
 var privateIPBlocks []*net.IPNet
+
+type circuitState struct {
+	failures int
+	openedAt time.Time
+}
+
+type outboundCircuitBreaker struct {
+	mu        sync.Mutex
+	states    map[string]circuitState
+	threshold int
+	cooldown  time.Duration
+	now       func() time.Time
+}
+
+func newOutboundCircuitBreaker(threshold int, cooldown time.Duration) *outboundCircuitBreaker {
+	return &outboundCircuitBreaker{
+		states:    make(map[string]circuitState),
+		threshold: threshold,
+		cooldown:  cooldown,
+		now:       time.Now,
+	}
+}
+
+func (breaker *outboundCircuitBreaker) allow(hostname string) bool {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+
+	state, exists := breaker.states[hostname]
+	if !exists || state.openedAt.IsZero() {
+		return true
+	}
+	if breaker.now().Sub(state.openedAt) >= breaker.cooldown {
+		delete(breaker.states, hostname)
+		return true
+	}
+	return false
+}
+
+func (breaker *outboundCircuitBreaker) recordFailure(hostname string) {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+
+	state := breaker.states[hostname]
+	state.failures++
+	if state.failures >= breaker.threshold && state.openedAt.IsZero() {
+		state.openedAt = breaker.now()
+	}
+	breaker.states[hostname] = state
+}
+
+func (breaker *outboundCircuitBreaker) recordSuccess(hostname string) {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	delete(breaker.states, hostname)
+}
+
+func circuitFailureThreshold() int {
+	value, err := strconv.Atoi(os.Getenv("CRAWLER_CIRCUIT_FAILURE_THRESHOLD"))
+	if err != nil || value < 1 {
+		return defaultCircuitFailureThreshold
+	}
+	return value
+}
+
+func circuitCooldown() time.Duration {
+	value, err := time.ParseDuration(os.Getenv("CRAWLER_CIRCUIT_COOLDOWN"))
+	if err != nil || value <= 0 {
+		return defaultCircuitCooldown
+	}
+	return value
+}
+
+var outboundBreaker = newOutboundCircuitBreaker(circuitFailureThreshold(), circuitCooldown())
 
 func init() {
 	for _, cidr := range []string{
-		"10.0.0.0/8",      // RFC 1918
-		"172.16.0.0/12",   // RFC 1918
-		"192.168.0.0/16",  // RFC 1918
-		"100.64.0.0/10",   // RFC 6598 (Carrier-grade NAT)
-		"198.18.0.0/15",   // RFC 2544
-		"169.254.0.0/16",  // RFC 3927 (Link-local)
-		"127.0.0.0/8",     // Loopback
-		"fc00::/7",        // Unique Local IPv6
-		"fe80::/10",       // Link-local IPv6
-		"::1/128",         // Loopback IPv6
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"100.64.0.0/10",  // RFC 6598 (Carrier-grade NAT)
+		"198.18.0.0/15",  // RFC 2544
+		"169.254.0.0/16", // RFC 3927 (Link-local)
+		"127.0.0.0/8",    // Loopback
+		"fc00::/7",       // Unique Local IPv6
+		"fe80::/10",      // Link-local IPv6
+		"::1/128",        // Loopback IPv6
 	} {
 		_, block, err := net.ParseCIDR(cidr)
 		if err == nil {
@@ -46,7 +130,7 @@ func init() {
 
 // isForbiddenIP returns true if the IP matches any private/forbidden range.
 func isForbiddenIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
 	for _, block := range privateIPBlocks {
@@ -57,6 +141,109 @@ func isForbiddenIP(ip net.IP) bool {
 	return false
 }
 
+func readLimitedBody(body io.Reader, maxBytes int64) ([]byte, error) {
+	bodyBytes, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(bodyBytes)) > maxBytes {
+		return nil, fmt.Errorf("response body exceeds configured limit")
+	}
+
+	return bodyBytes, nil
+}
+func configuredOutboundAllowlist() []string {
+	raw := os.Getenv("CRAWLER_OUTBOUND_ALLOWLIST")
+	if raw == "" {
+		return nil
+	}
+
+	entries := strings.Split(raw, ",")
+	allowlist := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(strings.ToLower(entry))
+		if entry != "" {
+			allowlist = append(allowlist, entry)
+		}
+	}
+	return allowlist
+}
+
+func isAllowedOutboundHost(hostname string) bool {
+	allowlist := configuredOutboundAllowlist()
+	if len(allowlist) == 0 {
+		return os.Getenv("NODE_ENV") != "production"
+	}
+
+	hostname = strings.ToLower(hostname)
+	for _, entry := range allowlist {
+		if entry == hostname {
+			return true
+		}
+		if strings.HasPrefix(entry, "*.") && strings.HasSuffix(hostname, strings.TrimPrefix(entry, "*")) {
+			return true
+		}
+	}
+	return false
+}
+
+func safeOutboundHost(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" {
+		return "unknown"
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
+func logOutboundEvent(event string, hostname string, reason string) {
+	log.Printf("outbound_event event=%s host=%s reason=%s", event, hostname, reason)
+}
+
+func outboundFailureReason(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	return "transport"
+}
+
+func validateOutboundURL(rawURL string) (*url.URL, error) {
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid outbound URL")
+	}
+
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("outbound URL scheme must be HTTP or HTTPS")
+	}
+
+	if parsed.Hostname() == "" {
+		return nil, fmt.Errorf("outbound URL host is required")
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "localhost" || strings.HasSuffix(hostname, ".localhost") {
+		return nil, fmt.Errorf("SSRF protection: localhost targets are not allowed")
+	}
+
+	if !isAllowedOutboundHost(hostname) {
+		return nil, fmt.Errorf("outbound URL host is not permitted by policy")
+	}
+
+	if parsed.User != nil {
+		return nil, fmt.Errorf("outbound URL credentials are not allowed")
+	}
+
+	if ip := net.ParseIP(parsed.Hostname()); ip != nil && isForbiddenIP(ip) {
+		return nil, fmt.Errorf("SSRF protection: forbidden outbound IP")
+	}
+
+	return parsed, nil
+}
 
 // safeDialContext resolves hostnames and blocks access to private IPs.
 func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -88,6 +275,10 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 func safeCheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return fmt.Errorf("too many redirects")
+	}
+
+	if _, err := validateOutboundURL(req.URL.String()); err != nil {
+		return fmt.Errorf("redirect blocked: %w", err)
 	}
 
 	host := req.URL.Hostname()
@@ -224,9 +415,17 @@ func main() {
 	http.HandleFunc("/crawl", handleCrawl)
 	http.HandleFunc("/sitemap", handleSitemap)
 
-	log.Fatal(http.ListenAndServe(":8081", nil))
-}
+	server := &http.Server{
+		Addr:              ":8081",
+		Handler:           http.DefaultServeMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
 
+	log.Fatal(server.ListenAndServe())
+}
 
 func handleCrawl(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -235,6 +434,7 @@ func handleCrawl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	var req CrawlRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"success":false,"error":"Invalid request payload"}`, http.StatusBadRequest)
@@ -246,9 +446,17 @@ func handleCrawl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsedTarget, err := url.Parse(req.URL)
+	parsedTarget, err := validateOutboundURL(req.URL)
 	if err != nil {
-		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: fmt.Sprintf("invalid URL: %v", err)})
+		logOutboundEvent("denied", safeOutboundHost(req.URL), "policy")
+		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: "outbound request denied"})
+		return
+	}
+
+	hostname := strings.ToLower(parsedTarget.Hostname())
+	if !outboundBreaker.allow(hostname) {
+		logOutboundEvent("denied", hostname, "circuit_open")
+		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: "outbound request temporarily unavailable"})
 		return
 	}
 
@@ -288,18 +496,26 @@ func handleCrawl(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Do(crawlReq)
 	if err != nil {
-		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: fmt.Sprintf("request failed: %v", err)})
+		reason := outboundFailureReason(err)
+		outboundBreaker.recordFailure(hostname)
+		logOutboundEvent("failed", hostname, reason)
+		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: "outbound request failed"})
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		outboundBreaker.recordFailure(hostname)
+		logOutboundEvent("failed", hostname, "upstream_5xx")
+	} else {
+		outboundBreaker.recordSuccess(hostname)
+	}
 
 	loadTimeMs := time.Since(start).Milliseconds()
 
 	// Limit response size to 5MB to prevent zip bomb / memory attacks
-	limitedReader := io.LimitReader(resp.Body, 5*1024*1024)
-	bodyBytes, err := io.ReadAll(limitedReader)
+	bodyBytes, err := readLimitedBody(resp.Body, maxCrawlBodyBytes)
 	if err != nil {
-		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: fmt.Sprintf("failed reading response body: %v", err)})
+		json.NewEncoder(w).Encode(CrawlResponse{Success: false, Error: "failed reading response body"})
 		return
 	}
 
@@ -343,6 +559,7 @@ func handleSitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	var req SitemapRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"success":false,"error":"Invalid request payload"}`, http.StatusBadRequest)
@@ -354,24 +571,46 @@ func handleSitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	parsedTarget, err := validateOutboundURL(req.URL)
+	if err != nil {
+		logOutboundEvent("denied", safeOutboundHost(req.URL), "policy")
+		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: "outbound request denied"})
+		return
+	}
+
+	hostname := strings.ToLower(parsedTarget.Hostname())
+	if !outboundBreaker.allow(hostname) {
+		logOutboundEvent("denied", hostname, "circuit_open")
+		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: "outbound request temporarily unavailable"})
+		return
+	}
+
 	client := buildSafeClient(30 * time.Second)
 	resp, err := client.Get(req.URL)
 	if err != nil {
-		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: err.Error()})
+		outboundBreaker.recordFailure(hostname)
+		logOutboundEvent("failed", hostname, outboundFailureReason(err))
+		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: "outbound request failed"})
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: fmt.Sprintf("invalid status code: %d", resp.StatusCode)})
+		if resp.StatusCode >= http.StatusInternalServerError {
+			outboundBreaker.recordFailure(hostname)
+			logOutboundEvent("failed", hostname, "upstream_5xx")
+		} else {
+			outboundBreaker.recordSuccess(hostname)
+		}
+		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: "invalid sitemap response"})
 		return
 	}
+	outboundBreaker.recordSuccess(hostname)
 
 	// Limit sitemap to 10MB
-	limitedReader := io.LimitReader(resp.Body, 10*1024*1024)
-	bodyBytes, err := io.ReadAll(limitedReader)
+	bodyBytes, err := readLimitedBody(resp.Body, maxSitemapBodyBytes)
 	if err != nil {
-		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: err.Error()})
+		json.NewEncoder(w).Encode(SitemapResponse{Success: false, Error: "outbound request failed"})
 		return
 	}
 

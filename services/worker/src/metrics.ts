@@ -8,6 +8,12 @@ export const crawlSuccessCounter = new Counter({
   labelNames: ['status', 'reason'],
 });
 
+export const jobDeadLetterCounter = new Counter({
+  name: 'job_dead_letter_total',
+  help: 'Total jobs moved to the durable dead-letter state after final failure',
+  labelNames: ['queue', 'job_name', 'error_code'],
+});
+
 export const aiTokensCounter = new Counter({
   name: 'ai_cost_tokens_total',
   help: 'Total AI tokens used',

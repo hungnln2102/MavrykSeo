@@ -40,7 +40,11 @@ try {
   // ignore
 }
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://admin:ZAQ!xsw21122@localhost:5432/seo_platform';
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error('DATABASE_URL must be configured before initializing the database client.');
+}
 export const client = postgres(connectionString);
 export const db = drizzle(client, { schema });
 export { sql } from 'drizzle-orm';

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Patch, Param } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Patch } from '@nestjs/common';
 import { WorkspacesService } from './workspaces.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
@@ -6,6 +6,7 @@ import { CurrentUser, CurrentWorkspace } from '../tenancy/decorators';
 import { UserRole } from '@seo/core';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
+import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('workspaces')
 @UseGuards(AuthGuard)
@@ -26,12 +27,15 @@ export class WorkspacesController {
   }
 
   @Get('active/members')
-  @UseGuards(TenantGuard)
+  @AuditLog('workspace.members.read', 'workspace')
+  @UseGuards(TenantGuard, RolesGuard)
+  @Roles('owner', 'admin')
   async getMembers(@CurrentWorkspace() workspaceId: string) {
     return this.workspacesService.getWorkspaceMembers(workspaceId);
   }
 
   @Post('active/members')
+  @AuditLog('workspace.member.add', 'membership')
   @UseGuards(TenantGuard, RolesGuard)
   @Roles('owner', 'admin')
   async addMember(
@@ -41,27 +45,30 @@ export class WorkspacesController {
     return this.workspacesService.addWorkspaceMember(workspaceId, body.email, body.role);
   }
 
-  @Patch(':id/status')
+  @Patch('active/status')
+  @AuditLog('workspace.status.update', 'workspace')
   @UseGuards(TenantGuard, RolesGuard)
   @Roles('owner', 'admin')
   async updateStatus(
-    @Param('id') id: string,
+    @CurrentWorkspace() workspaceId: string,
     @Body() body: { status: string }
   ) {
-    return this.workspacesService.updateWorkspaceStatus(id, body.status);
+    return this.workspacesService.updateWorkspaceStatus(workspaceId, body.status);
   }
 
-  @Patch(':id/plan')
+  @Patch('active/plan')
+  @AuditLog('workspace.plan.update', 'workspace')
   @UseGuards(TenantGuard, RolesGuard)
   @Roles('owner', 'admin')
   async updatePlan(
-    @Param('id') id: string,
+    @CurrentWorkspace() workspaceId: string,
     @Body() body: { plan: string }
   ) {
-    return this.workspacesService.updateWorkspacePlan(id, body.plan);
+    return this.workspacesService.updateWorkspacePlan(workspaceId, body.plan);
   }
 
   @Patch('active/white-label')
+  @AuditLog('workspace.white_label.update', 'workspace')
   @UseGuards(TenantGuard, RolesGuard)
   @Roles('owner', 'admin')
   async updateWhiteLabel(
@@ -72,7 +79,9 @@ export class WorkspacesController {
   }
 
   @Get('active/white-label')
-  @UseGuards(TenantGuard)
+  @AuditLog('workspace.white_label.read', 'workspace')
+  @UseGuards(TenantGuard, RolesGuard)
+  @Roles('owner', 'admin')
   async getWhiteLabel(@CurrentWorkspace() workspaceId: string) {
     return this.workspacesService.getWorkspaceWhiteLabel(workspaceId);
   }

@@ -47,7 +47,8 @@ export class TenantGuard implements CanActivate {
     }
 
     const activeWorkspace = workspaceResult[0];
-    const isAdministrativeRoute = request.url.includes('/status') || request.url.includes('/plan');
+    const requestUrl = request.url || '';
+    const isAdministrativeRoute = requestUrl.includes('/status') || requestUrl.includes('/plan');
     if (activeWorkspace.status === 'suspended' && !isAdministrativeRoute) {
       throw new ForbiddenException('Workspace is suspended. Please contact support.');
     }

@@ -27,6 +27,7 @@ export class AuditLogInterceptor implements NestInterceptor {
     const entityId = request.params?.id || 
                      request.params?.siteId || 
                      request.params?.projectId || 
+                     request.params?.jobRunId ||
                      request.params?.contentPlanId || 
                      request.body?.id || 
                      request.body?.projectId || 

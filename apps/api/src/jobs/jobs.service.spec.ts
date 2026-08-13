@@ -100,6 +100,17 @@ describe('JobsService failed-job operations', () => {
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
+  it('scopes failed-job listing queries to the active workspace', async () => {
+    mockSelect.mockReturnValue({
+      from: () => ({ where: jest.fn().mockResolvedValue([]) }),
+    });
+
+    await expect(service.getFailedJobs('workspace-2')).resolves.toEqual([]);
+
+    expect(require('drizzle-orm').eq).toHaveBeenCalledWith(jobRuns.workspaceId, 'workspace-2');
+    expect(require('drizzle-orm').eq).toHaveBeenCalledWith(jobRuns.state, 'dead_lettered');
+  });
+
   it('replays a failed job with a new queue identity and persisted lineage', async () => {
     mockSelectRows([failedCrawlRun]);
 
@@ -133,5 +144,16 @@ describe('JobsService failed-job operations', () => {
     );
 
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('rejects a replay payload without a valid ingestion key before queue dispatch', async () => {
+    mockSelectRows([{ ...failedCrawlRun, ingestionKey: null }]);
+
+    await expect(service.replayFailedJob('workspace-1', 'job-run-1')).rejects.toThrow(
+      new BadRequestException('Stored job payload is invalid for replay'),
+    );
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 });

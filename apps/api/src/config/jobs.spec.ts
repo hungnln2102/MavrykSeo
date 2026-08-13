@@ -1,7 +1,12 @@
 import {
   createJobEnvelope,
+  createDemoCrawlJobFixture,
+  createDemoRankJobFixture,
+  demoJobContractIds,
   isRetryableJobError,
+  isValidCrawlJobData,
   isValidJobEnvelope,
+  isValidRankJobData,
   JOB_SCHEMA_VERSION,
   nonRetryableJobError,
   retryableJobError,
@@ -34,6 +39,27 @@ describe('job envelope contract', () => {
       correlationId: 'correlation-1',
       idempotencyKey: 'idempotency-1',
     } as unknown as Partial<ReturnType<typeof createJobEnvelope>>)).toBe(false);
+  });
+
+  it('keeps the crawl fixture compatible with the API-to-worker contract', () => {
+    const fixture = createDemoCrawlJobFixture();
+
+    expect(fixture.workspaceId).toBe(demoJobContractIds.workspaceId);
+    expect(fixture.siteId).toBe(demoJobContractIds.siteId);
+    expect(fixture.ingestionKey).toBe(fixture.idempotencyKey);
+    expect(isValidCrawlJobData(fixture)).toBe(true);
+    expect(isValidCrawlJobData({ ...fixture, ingestionKey: '' })).toBe(false);
+  });
+
+  it('keeps the rank fixture compatible with the API-to-worker contract', () => {
+    const fixture = createDemoRankJobFixture();
+
+    expect(fixture.workspaceId).toBe(demoJobContractIds.workspaceId);
+    expect(fixture.projectId).toBe(demoJobContractIds.projectId);
+    expect(fixture.ingestionKey).toBe(fixture.idempotencyKey);
+    expect(isValidRankJobData(fixture)).toBe(true);
+    expect(isValidRankJobData({ ...fixture, numResults: 0 })).toBe(false);
+    expect(isValidRankJobData({ ...fixture, ingestionKey: '' })).toBe(false);
   });
 
   it('classifies tenant and payload errors as non-retryable while provider failures remain retryable', () => {

@@ -8,6 +8,21 @@ export interface JobEnvelope {
   idempotencyKey: string;
 }
 
+export interface CrawlJobData extends JobEnvelope {
+  workspaceId: string;
+  siteId: string;
+  userAgent?: string;
+  ingestionKey: string;
+}
+
+export interface RankJobData extends JobEnvelope {
+  workspaceId: string;
+  projectId: string;
+  query: string;
+  numResults?: number;
+  ingestionKey: string;
+}
+
 export type JobErrorCode =
   | 'invalid_payload'
   | 'tenant_scope_violation'
@@ -62,4 +77,27 @@ export function isValidJobEnvelope(value: Partial<JobEnvelope>): value is JobEnv
     && value.correlationId.length > 0
     && typeof value.idempotencyKey === 'string'
     && value.idempotencyKey.length > 0;
+}
+
+export function isValidCrawlJobData(value: Partial<CrawlJobData>): value is CrawlJobData {
+  return isValidJobEnvelope(value as Partial<JobEnvelope>)
+    && typeof value.workspaceId === 'string'
+    && value.workspaceId.length > 0
+    && typeof value.siteId === 'string'
+    && value.siteId.length > 0
+    && typeof value.ingestionKey === 'string'
+    && value.ingestionKey.length > 0;
+}
+
+export function isValidRankJobData(value: Partial<RankJobData>): value is RankJobData {
+  return isValidJobEnvelope(value as Partial<JobEnvelope>)
+    && typeof value.workspaceId === 'string'
+    && value.workspaceId.length > 0
+    && typeof value.projectId === 'string'
+    && value.projectId.length > 0
+    && typeof value.query === 'string'
+    && value.query.trim().length > 0
+    && (value.numResults === undefined || (Number.isInteger(value.numResults) && value.numResults > 0))
+    && typeof value.ingestionKey === 'string'
+    && value.ingestionKey.length > 0;
 }

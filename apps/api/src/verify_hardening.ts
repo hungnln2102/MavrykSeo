@@ -128,8 +128,7 @@ async function runTests() {
     });
 
     if (!saveRes.ok) {
-      const errorMsg = await saveRes.text();
-      throw new Error(`Failed to save integration credentials: HTTP ${saveRes.status} - ${errorMsg}`);
+      throw new Error(`Failed to save integration credentials: HTTP ${saveRes.status}`);
     }
     console.log('  ✔ Credentials saved successfully.');
 
@@ -146,7 +145,6 @@ async function runTests() {
     }
 
     const rawStoredCredentials = storedIntegrations[0].credentials;
-    console.log('  Raw value in database column:', rawStoredCredentials);
 
     if (rawStoredCredentials.includes('my-gsc-refresh-token-123456789')) {
       throw new Error('CRITICAL SECURITY ISSUE: Credentials stored in database as plain text!');
@@ -179,7 +177,6 @@ async function runTests() {
     }
 
     const retrievedData = (await getRes.json()) as any;
-    console.log('  API response credentials:', JSON.stringify(retrievedData.credentials));
 
     if (
       retrievedData.credentials &&
@@ -204,7 +201,6 @@ async function runTests() {
     }
 
     const auditLog = auditLogsResult[0];
-    console.log('  Audit log entry:', JSON.stringify(auditLog));
     if (auditLog.action === 'integration.save' && auditLog.entityType === 'integration') {
       console.log('  ✔ Audit log verification passed.');
     } else {

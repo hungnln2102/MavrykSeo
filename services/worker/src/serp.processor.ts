@@ -4,16 +4,8 @@ import { clickhouse } from '@seo/clickhouse';
 import { db, ingestionFences, jobRuns, projects } from '@seo/db';
 import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
-import { isRetryableJobError, isValidJobEnvelope, JobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
+import { isRetryableJobError, isValidJobEnvelope, isValidRankJobData, JobProcessingError, nonRetryableJobError, RankJobData } from '@seo/core';
 import { jobDeadLetterCounter } from './metrics';
-
-interface SerpJobData extends JobEnvelope {
-  workspaceId: string;
-  projectId: string;
-  query: string;
-  numResults?: number;
-  ingestionKey?: string;
-}
 
 @Injectable()
 export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
@@ -32,7 +24,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
 
     this.worker = new Worker(
       'collector-queue',
-      async (job: Job<SerpJobData>) => {
+      async (job: Job<RankJobData>) => {
         try {
           if (job.name === 'serp.requested' || job.name === 'rank.requested') {
             await this.markActive(job);
@@ -75,14 +67,14 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async handleSerpJob(job: Job<SerpJobData>) {
+  private async handleSerpJob(job: Job<RankJobData>) {
     const { workspaceId, projectId, query, numResults } = job.data;
     console.log(`Processing SERP collection job ${job.id} for project: ${projectId}, query: ${query}`);
 
-    if (!isValidJobEnvelope(job.data) || !workspaceId || !projectId || !query) {
+    if (!isValidRankJobData(job.data)) {
       throw nonRetryableJobError(
         'invalid_payload',
-        'Invalid SERP job data: schema version, correlation ID, idempotency key, workspaceId, projectId, and query are required',
+        'Invalid SERP job data: schema version, correlation ID, idempotency key, workspaceId, projectId, query, and ingestion key are required',
       );
     }
 
@@ -138,7 +130,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
         project_id: projectId,
         keyword: query,
         rank: res.position,
-        search_volume: 100 + Math.floor(Math.random() * 5000), // Procedural volume for mock
+        search_volume: 0,
         url: res.url,
         competitor_domain: competitorDomain,
       };
@@ -164,7 +156,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async markActive(job: Job<SerpJobData>) {
+  private async markActive(job: Job<RankJobData>) {
     if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
 
     await db.update(jobRuns).set({
@@ -176,7 +168,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
   }
 
-  private async acquireIngestionFence(job: Job<SerpJobData>) {
+  private async acquireIngestionFence(job: Job<RankJobData>) {
     const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
     const [createdFence] = await db.insert(ingestionFences).values({
       workspaceId: job.data.workspaceId,
@@ -208,7 +200,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async completeIngestionFence(job: Job<SerpJobData>) {
+  private async completeIngestionFence(job: Job<RankJobData>) {
     const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
     await db.update(ingestionFences).set({
       state: 'completed',
@@ -219,7 +211,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async markIngestionState(
-    job: Job<SerpJobData>,
+    job: Job<RankJobData>,
     ingestionState: string,
     timestamps: { ingestionStartedAt?: Date; ingestionCompletedAt?: Date } = {},
   ) {
@@ -230,7 +222,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
   }
 
-  private async markCompleted(job: Job<SerpJobData>) {
+  private async markCompleted(job: Job<RankJobData>) {
     if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
 
     await db.update(jobRuns).set({
@@ -242,7 +234,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     }).where(and(eq(jobRuns.workspaceId, job.data.workspaceId), eq(jobRuns.idempotencyKey, job.data.idempotencyKey)));
   }
 
-  private async markFailed(job: Job<SerpJobData>, error: Error) {
+  private async markFailed(job: Job<RankJobData>, error: Error) {
     if (!isValidJobEnvelope(job.data) || !job.data.workspaceId) return;
 
     await db.update(jobRuns).set({
@@ -260,7 +252,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private isFinalFailure(job: Job<SerpJobData>, error: Error) {
+  private isFinalFailure(job: Job<RankJobData>, error: Error) {
     return error instanceof UnrecoverableError || job.attemptsMade >= (job.opts.attempts || 1);
   }
 }

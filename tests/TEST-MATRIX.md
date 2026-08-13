@@ -8,7 +8,8 @@ This matrix separates deterministic CI checks from tests that require Docker ser
 | --- | --- | --- | --- | --- |
 | Static | `pnpm lint` | None | API lint and Next.js lint | Required |
 | Typecheck | `pnpm typecheck` | None | API, worker, web, admin, shared packages | Required |
-| Unit | `pnpm test` | None | API `RolesGuard` authorization behavior | Required |
+| Unit | `pnpm test` | None | API authorization, tenant scope, service behavior, and API-to-worker job-contract fixtures | Required |
+| Browser | `pnpm exec playwright test` | Local Next.js server started by Playwright | Responsive dashboard navigation and no horizontal overflow at mobile, tablet, min-PC, standard PC, and max-PC viewports | Required |
 | Build | `pnpm build` | None | All workspace production builds | Required |
 | Integration | `pnpm test:integration` | Isolated AI service, provider mocks, approved local data services | Worker detector verification | Manual / future Docker Compose CI |
 | Service hardening | `pnpm --filter api exec ts-node src/verify_hardening.ts` | Local PostgreSQL, ClickHouse, Redis, API | Health, readiness, rate limit, encrypted integrations, audit logging | Manual |
@@ -19,7 +20,7 @@ This matrix separates deterministic CI checks from tests that require Docker ser
 
 - Fixtures must use a dedicated demo workspace/project and never production credentials or customer data.
 - Integration tests may create data only in isolated local/staging environments and must clean up deterministically.
-- Browser coverage must eventually include mobile, tablet, min-PC, standard PC, and max-PC breakpoints.
+- Browser coverage includes mobile, tablet, min-PC, standard PC, and max-PC breakpoints; extend it whenever a user flow becomes production-ready.
 - Provider, crawler, SERP, GSC, and AI tests must assert quota/rate-limit/retry behavior before being marked production-ready.
 - A skipped integration test must be visible in CI documentation; it must not silently become a passing test.
 
@@ -28,4 +29,4 @@ This matrix separates deterministic CI checks from tests that require Docker ser
 - Add unit tests for `TenantGuard` with database adapters or a test database.
 - Add API controller/service contract tests for tenant-scoped reads and writes.
 - Move detector verification to an explicit Docker Compose integration job once the Python AI test image and service health check are deterministic.
-- Add responsive browser E2E coverage for onboarding, Site Audit, Rank Tracker, Settings, and Action Center.
+- Add authenticated responsive E2E coverage for onboarding, Site Audit, Rank Tracker, Settings, and Action Center once their real-data flows are production-ready.

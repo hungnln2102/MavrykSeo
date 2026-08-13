@@ -51,3 +51,4 @@ export type CanonicalEvent = typeof CanonicalEvents[keyof typeof CanonicalEvents
 export * from './crypto';
 
 export * from './jobs';
+export * from './job-contract.fixtures';

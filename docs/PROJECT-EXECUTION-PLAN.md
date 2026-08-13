@@ -138,26 +138,26 @@ Status transitions are evidence-gated:
   - [x] Run deterministic dependency install using the pinned pnpm version and frozen lockfile.
   - [x] Run lint, explicit typecheck commands, deterministic unit tests, migration metadata validation, and build; integration tests remain documented as a separate gate.
   - [x] Cache pnpm store without caching generated database data or secrets.
-  - [ ] Add dependency/container/secret scanning with a documented remediation policy.
+  - [x] Add dependency/container/secret scanning with a documented remediation policy.
   - [ ] Upload test reports and build artifacts only when they contain no customer data/secrets.
 - **Acceptance:** A clean clone passes CI; a deliberate lint/type/build failure fails CI; no credentials are needed for static checks.
 
 ### P0-A2 — Make quality gates real
 
-- **Status:** Ready for verification
+- **Status:** Done
 - **Dependencies:** P0-A1
 - **Scope:** Typechecks, deterministic API RBAC tests, migration metadata checks, and the test matrix are implemented; expand integration, controller/service, and responsive E2E coverage.
 - **Tasks:**
   - [x] Add `typecheck` scripts for API, worker, web, admin, and packages.
   - [x] Add API Jest configuration and RBAC unit tests; keep worker detector verification as an explicit integration test.
-  - [ ] Add fixtures for API/worker contracts without using production credentials or customer data.
+  - [x] Add fixtures for API/worker contracts without using production credentials or customer data.
   - [x] Define test tiers in `tests/TEST-MATRIX.md`; Docker Compose E2E and production smoke coverage remain open.
-  - [ ] Ensure browser UI tests cover responsive breakpoints: mobile, tablet, min-PC, standard PC, and max-PC.
+  - [x] Ensure browser UI tests cover responsive breakpoints: mobile, tablet, min-PC, standard PC, and max-PC. Playwright starts the local Next.js app, verifies dashboard navigation and horizontal overflow at all five viewports, and runs in CI.
 - **Acceptance:** `pnpm typecheck` and `pnpm test` execute meaningful tasks in every applicable workspace and produce a clear report of skipped integration tests.
 
 ### P0-A3 — Reproducible local environment and migration discipline
 
-- **Status:** In progress
+- **Status:** Done
 - **Dependencies:** P0-A1
 - **Tasks:**
   - [x] Correct and verify local commands; add root `db:generate`, `db:migrate`, `db:check`, `local:up`, and `local:down` scripts.
@@ -201,7 +201,7 @@ Status transitions are evidence-gated:
 - **Dependencies:** P0-A3, P0-D4
 - **Tasks:**
   - [ ] Select/approve a SERP provider contract: regions, language, device, rate limits, terms, cost, and error semantics.
-  - [ ] Model tracked keyword configuration in PostgreSQL and immutable observation/snapshot history in ClickHouse/S3.
+  - [~] Model tracked keyword configuration in PostgreSQL and immutable observation/snapshot history in ClickHouse/S3. The interim collector has no approved volume provider, so SERP ingestion records `search_volume` as `0` rather than fabricating a metric; provider metadata and raw snapshots remain pending.
   - [ ] Implement scheduling, provider retries/backoff, idempotency, partial result handling, and stale result labeling.
   - [ ] Track per-project provider usage/cost, quotas, alerts, and kill switch.
   - [ ] Add fixtures for country/device/SERP feature parsing and provider failure modes.
@@ -284,7 +284,7 @@ Status transitions are evidence-gated:
 - **Status:** In progress
 - **Dependencies:** P0-A2
 - **Tasks:**
-  - [~] Build automated negative tests for every read/write API: forged workspace/project IDs, role changes, direct object ID access, and background-job payloads. Guard-level coverage rejects unauthenticated, missing-header, forged-workspace, missing-workspace, and suspended-workspace requests; service coverage includes Projects, Sites, Keywords, Recommendations, Reports, Content, Integrations, and Workspaces. Crawl and rank workers now require workspace context and revalidate PostgreSQL ownership; controller coverage and worker regression tests remain.
+  - [~] Build automated negative tests for every read/write API: forged workspace/project IDs, role changes, direct object ID access, and background-job payloads. Guard-level coverage rejects unauthenticated, missing-header, forged-workspace, missing-workspace, and suspended-workspace requests; service coverage includes Projects, Sites, Keywords, Recommendations, Reports, Content, Integrations, Workspaces, and cross-tenant failed-job replay/listing. Failed-job controller tests verify the guard-provided workspace is delegated unchanged and owner/admin plus audit metadata remain attached. Crawl and rank workers now require workspace context and revalidate PostgreSQL ownership; replay validates the typed payload contract before queue dispatch. Worker regression tests and coverage of remaining controllers remain.
   - [~] Verify Client role cannot access internal notes, admin data, credentials, or workspace configuration. Recommendation reads mask internal notes; Integration credential reads, workspace members, and white-label configuration require owner/admin. Remaining admin data needs review.
   - [~] Ensure queries are workspace/project scoped by design and are reviewed in controllers/services/workers. Projects, Sites, Keywords, Recommendations, Reports, Content, Integrations, Workspace mutation paths, and crawl/rank worker entry points are covered; remaining domains need review.
   - [~] Add audit events for security-sensitive mutations and access-denied events where appropriate. Crawl requests, Report creation, Recommendation mutations, Content write/AI operations, Integration credential reads/writes, and Workspace administration emit audited success events without request body values; access-denied coverage remains.
@@ -299,7 +299,7 @@ Status transitions are evidence-gated:
   - [~] Integrate production secret manager and document local/staging/production secret separation. Environment separation and approved-secret-manager requirements are documented; provider-specific secret-manager integration remains.
   - [~] Verify password/token/API-key redaction across logs, errors, telemetry, and audit events. Audit regression coverage confirms request body values are not written; broader log and telemetry redaction remains.
   - [~] Test OAuth encryption/decryption, key rotation/migration plan, refresh/revoke, and compromised-token response. Encryption/decryption and a documented rotation plan are covered; migration execution, refresh/revoke, and compromised-token response remain.
-  - [~] Verify auth session/JWT expiry, rotation, logout/revocation, and rate-limited login behavior. Auth guard regression tests cover valid, expired, malformed, and malformed-header tokens; login/register endpoints are rate-limited. Rotation, logout, and revocation remain.
+  - [~] Verify auth session/JWT expiry, rotation, logout/revocation, and rate-limited login behavior. Auth guard regression tests cover valid, expired, malformed, and malformed-header tokens; login/register endpoints are rate-limited, and rate-limit regression tests confirm repeated login attempts are capped per IP without consuming another IP's budget. Rotation, logout, and revocation remain.
 - **Acceptance:** No secret is committed or logged; production cannot start with unsafe fallback encryption; credentials remain recoverable through an approved rotation process.
 
 ### P0-D3 — Crawler and outbound workload hardening

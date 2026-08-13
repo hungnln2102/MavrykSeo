@@ -7,14 +7,7 @@ import { db, ingestionFences, jobRuns, projects, sites, workspaces } from '@seo/
 import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
 import { crawlSuccessCounter, jobDeadLetterCounter } from './metrics';
-import { isRetryableJobError, isValidJobEnvelope, JobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
-
-interface CrawlJobData extends JobEnvelope {
-  workspaceId: string;
-  siteId: string;
-  userAgent?: string;
-  ingestionKey?: string;
-}
+import { CrawlJobData, isRetryableJobError, isValidCrawlJobData, isValidJobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
 
 function isCrawlKillSwitchEnabled(): boolean {
   return process.env.CRAWL_KILL_SWITCH?.trim().toLowerCase() === 'true';
@@ -92,10 +85,10 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
   private async handleCrawlJob(job: Job<CrawlJobData>) {
     const { workspaceId, siteId, userAgent } = job.data;
 
-    if (!isValidJobEnvelope(job.data) || !workspaceId || !siteId) {
+    if (!isValidCrawlJobData(job.data)) {
       throw nonRetryableJobError(
         'invalid_payload',
-        'Invalid crawl job data: schema version, correlation ID, idempotency key, workspaceId, and siteId are required',
+        'Invalid crawl job data: schema version, correlation ID, idempotency key, workspaceId, siteId, and ingestion key are required',
       );
     }
 

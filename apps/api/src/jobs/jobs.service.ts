@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Queue } from 'bullmq';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { createJobEnvelope } from '@seo/core';
+import { createJobEnvelope, isValidCrawlJobData, isValidRankJobData } from '@seo/core';
 import { db, jobRuns } from '@seo/db';
 
 const QUEUE_OPTIONS = {
@@ -77,6 +77,10 @@ export class JobsService {
       ingestionKey: failedRun.ingestionKey,
     };
 
+    if (!this.isValidReplayPayload(failedRun.queueName, replayPayload)) {
+      throw new BadRequestException('Stored job payload is invalid for replay');
+    }
+
     let replayRecorded = false;
     try {
       await db.insert(jobRuns).values({
@@ -130,6 +134,12 @@ export class JobsService {
   private isSupportedJob(queueName: string, jobName: string) {
     return (queueName === 'crawler-queue' && jobName === 'crawl.requested')
       || (queueName === 'collector-queue' && (jobName === 'rank.requested' || jobName === 'serp.requested'));
+  }
+
+  private isValidReplayPayload(queueName: string, payload: ReplayablePayload) {
+    return queueName === 'crawler-queue'
+      ? isValidCrawlJobData(payload)
+      : isValidRankJobData(payload);
   }
 
   private toSafeJobRun(jobRun: typeof jobRuns.$inferSelect) {

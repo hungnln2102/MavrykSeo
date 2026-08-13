@@ -1230,7 +1230,7 @@ export default function Page() {
   return (
     <main className="dashboard-layout">
       {/* Sidebar Navigation */}
-      <aside style={styles.sidebar}>
+      <aside className={'dashboard-sidebar'} style={styles.sidebar}>
         <div style={styles.logoContainer}>
           <div style={styles.logoGlow}></div>
           <span style={styles.logoText}>Mavryk<span style={{ color: 'var(--accent-secondary)' }}>Seo</span></span>
@@ -1262,7 +1262,7 @@ export default function Page() {
         </div>
 
         {/* Nav Links */}
-        <nav style={styles.navMenu}>
+        <nav aria-label={'Primary navigation'} className={'dashboard-navigation'} style={styles.navMenu}>
           <button
             onClick={() => setActiveTab('dashboard')}
             style={{ ...styles.navItem, ...(activeTab === 'dashboard' ? styles.navItemActive : {}) }}
@@ -1332,9 +1332,9 @@ export default function Page() {
       </aside>
 
       {/* Main Panel Content */}
-      <section style={styles.mainContent}>
+      <section className={'dashboard-content'} style={styles.mainContent}>
         {/* Header */}
-        <header style={styles.header}>
+        <header className={'dashboard-header'} style={styles.header}>
           <div>
             <h1 style={styles.headerTitle}>
               {activeTab === 'dashboard' && 'SEO Dashboard'}
@@ -1352,13 +1352,13 @@ export default function Page() {
               <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{selectedSite}</span>
             </p>
           </div>
-          <div style={styles.headerActions}>
+          <div className={'dashboard-header-actions'} style={styles.headerActions}>
             <button style={styles.iconButton}>
               <Bell size={18} />
               <div style={styles.notificationBadge} />
             </button>
             <div style={styles.divider} />
-            <button style={styles.actionButton}>
+            <button className={'dashboard-ai-action'} style={styles.actionButton}>
               <Sparkles size={16} />
               <span>AI recommendations</span>
             </button>
@@ -1368,7 +1368,7 @@ export default function Page() {
         {activeTab === 'dashboard' && (
           <>
             {/* Metrics Grid */}
-            <div style={styles.metricsGrid}>
+            <div className={'dashboard-metrics-grid'} style={styles.metricsGrid}>
               {metrics.map((m, idx) => {
                 const Icon = m.icon;
                 return (
@@ -1398,7 +1398,7 @@ export default function Page() {
 
             {/* Chart Card */}
             <div className="glass-card" style={styles.chartCard}>
-              <div style={styles.chartHeader}>
+              <div className={'dashboard-chart-header'} style={styles.chartHeader}>
                 <div>
                   <h2 style={styles.cardTitle}>Performance Overview</h2>
                   <p style={styles.cardSubtitle}>Organic traffic trends and daily impressions</p>

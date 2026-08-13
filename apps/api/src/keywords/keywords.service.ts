@@ -4,7 +4,7 @@ import { clickhouse } from '@seo/clickhouse';
 import { eq, and } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { MetricsService } from '../metrics/metrics.service';
-import { createJobEnvelope } from '@seo/core';
+import { createJobEnvelope, RankJobData } from '@seo/core';
 
 @Injectable()
 export class KeywordsService {
@@ -70,7 +70,7 @@ export class KeywordsService {
     // 3. Trigger immediate rank tracking job in BullMQ
     if (this.queue) {
       const envelope = createJobEnvelope('rank.requested', [workspaceId, projectId, keywordLower]);
-        const jobData = {
+        const jobData: RankJobData = {
           ...envelope,
           workspaceId,
           projectId,

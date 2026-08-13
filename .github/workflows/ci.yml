@@ -10,6 +10,40 @@ permissions:
   contents: read
 
 jobs:
+  security:
+    name: Secret, dependency, and container security scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan committed secrets
+        uses: gitleaks/gitleaks-action@v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan dependency vulnerabilities
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan container and Compose misconfigurations
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
   quality:
     name: Lint, typecheck, test, and build
     runs-on: ubuntu-latest
@@ -71,6 +105,12 @@ jobs:
 
       - name: Test deterministic checks
         run: pnpm test
+
+      - name: Install Chromium for responsive browser tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test responsive browser coverage
+        run: pnpm exec playwright test
 
       - name: Build
         run: pnpm build

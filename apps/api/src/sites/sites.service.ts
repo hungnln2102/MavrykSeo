@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException 
 import { db, jobRuns, sites, projects, workspaces } from '@seo/db';
 import { eq, and, count, inArray } from 'drizzle-orm';
 import { Queue } from 'bullmq';
-import { createJobEnvelope } from '@seo/core';
+import { createJobEnvelope, CrawlJobData } from '@seo/core';
 
 @Injectable()
 export class SitesService {
@@ -205,7 +205,7 @@ export class SitesService {
 
     // 2. Enqueue crawl job in BullMQ crawler-queue
     const envelope = createJobEnvelope('crawl.requested', [workspaceId, site.id, runKey]);
-    const jobData = {
+    const jobData: CrawlJobData = {
       ...envelope,
       workspaceId,
       siteId: site.id,

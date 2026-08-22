@@ -415,197 +415,95 @@ Mọi endpoint thực thi server-side tenant scope, RBAC, audit log và idempote
 - [x] Test không cho sửa ngầm control đã được audit run sử dụng.
 - **Acceptance:** tạo audit run mới từ một version; audit cũ không thay đổi khi version mới phát hành.
 
-### EPIC P0-02 — Tenant/RBAC/Audit Log
+### Phase 0 — Security Stabilization (Khóa rủi ro bảo mật P0)
 
-- [x] Negative tests cho workspace/project/control/action/artifact IDs.
-- [x] Server-side query scoping helpers bắt buộc.
-- [x] Role matrix và project-level membership.
-- [x] Internal/client visibility enforcement.
-- [x] Audit log cho connection, approval, replay, export, delete và risk acceptance.
-- [x] Support session có lý do, TTL và audit.
-- **Acceptance:** cross-tenant access/replay/export bị chặn và cảnh báo.
+**Mục tiêu:** Đảm bảo hệ thống có cơ chế Authentication, Auditing và Authorization đáng tin cậy, cô lập hoàn toàn đa thuê (multi-tenant) và dự án (cross-project).
 
-### EPIC P0-03 — Unified Integration Control Plane
+- [ ] **P0-01: Thay thế phương thức Authentication**: Tái cấu trúc cơ chế phiên làm việc (AuthSession). Không cấp JWT trực tiếp chỉ bằng email. Thay thế bằng OIDC/OAuth, Passwords + MFA hoặc Magic link sử dụng một lần có chữ ký số. Cung cấp access token ngắn hạn, refresh token rotation và cơ chế thu hồi session (session revocation).
+- [ ] **P0-02: Loại bỏ Auto-login test account**: Triệt tiêu hoàn toàn logic tự động đăng nhập tài khoản test (`test@mavryk.io`) trong frontend (Next.js) khi khởi động. Thiết lập Route Guard ở cả middleware và NestJS controllers.
+- [ ] **P0-03: Project Guard dạng fail-closed**: Nâng cấp `ProjectGuard` phủ toàn bộ các routes liên quan đến tài nguyên dự án (site, recommendation, keyword, report...). Đảm bảo cơ chế từ chối mặc định (fail-closed) khi không phân giải được context `projectId`.
+- [ ] **P0-04: Global Validation**: Enforce `ValidationPipe` toàn cục trong NestJS Fastify app. Dùng DTO schemas (class-validator/Zod) với whitelist và reject unknown properties trên mọi body request.
+- [ ] **P0-05: CORS và CSP headers**: Thu hẹp CORS origin wildcards (`*`), cấu hình allowlist động theo môi trường. Thiết lập Security Headers và Content Security Policy (CSP).
+- [x] **P0-06: Tenant Isolation Suite**: Xây dựng bộ test suite thử nghiệm xâm nhập chéo tenant/project (negative testing) để xác thực tính cô lập dữ liệu (đã hoàn thành một phần).
+- [ ] **P0-07: Khai tử Mock/Fallback Evidence**: Khi thiếu dữ liệu crawler/GSC, hệ thống trả về kết quả `NEED_DATA`, nghiêm cấm tạo evidence hoặc findings giả.
+- [ ] **P0-08: Secret & Session Management**: Luân chuyển key (key rotation), mã hóa AES-256-GCM cho credentials, không cho phép default secrets tại môi trường production.
+- [ ] **P0-09: Full-stack Smoke Test**: Thiết lập E2E pipeline chạy thử nghiệm liên lạc từ API cho đến Worker, Crawler, database (PostgreSQL, ClickHouse), và S3 storage.
+- [ ] **P0-10: Production Config Validation**: Bổ sung cơ chế validate fail-fast cấu hình môi trường ngay khi khởi động dịch vụ.
 
-- [ ] Source catalog và connection wizard.
-- [x] OAuth PKCE/state, encrypted refresh tokens, key rotation.
-- [x] GSC property selector và permission validation.
-- [ ] GA4 property/data-stream selector và metadata sync.
-- [ ] GBP account/location selector.
-- [ ] API key vault cho vendor sources.
-- [ ] CSV import mapping/versioning cho fallback.
-- [ ] Connection health, freshness, quota và reconnect/disconnect.
-- [x] Raw-response S3 write trước normalization.
-- **Acceptance:** user kết nối nguồn và thấy data/freshness/error mà không mở trang nguồn.
+- **Acceptance Gate:** Không còn bất kỳ lỗ hổng bảo mật P0/Critical nào được báo cáo. 100% tenant/cross-project negative tests pass.
 
-### EPIC P0-04 — Data Lineage và Quality
+---
 
-- [x] Shared source envelope: source, run, observed_at, ingested_at, schema version.
-- [x] Raw/normalized/derived classification.
-- [x] Idempotency fences và reprocessing.
-- [x] Freshness SLO theo nguồn.
-- [x] Quality rules: duplicate, null, range, completeness, schema drift.
-- [x] UI data provenance drawer trên mọi metric/finding.
-- [x] Stale/missing/estimated badges.
-- **Acceptance:** mọi số liệu truy về raw artifact và normalization version.
+### Phase 1 — Audit Data Model (Thiết lập mô hình kiểm toán)
 
-### EPIC P0-05 — Crawl, Render và URL Explorer
+**Mục tiêu:** Chuyển đổi 296 tiêu chuẩn SEO từ Markdown thành mô hình dạng máy đọc được (machine-readable) để tích hợp sâu vào Database và Ingestion Pipelines.
 
-- [x] Safe fetch chống SSRF/DNS rebinding/redirect/private IP.
-- [x] Robots, rate, concurrency, size, depth và URL pattern controls.
-- [x] Raw HTML, headers và redirect history.
-- [ ] Chromium render queue, screenshot, DOM và network/console errors.
-- [ ] Raw/rendered diff.
-- [ ] Link graph, sitemap merge và URL inventory.
-- [x] Crawl schedules, progress, cancel, retry, kill switch.
-- [ ] URL Explorer history và compare runs.
-- [ ] Cost/resource limits.
-- **Acceptance:** agency xem URL evidence và lịch sử trong MAVRYKSEO.
+- [ ] **P1-01: Machine-readable Control Registry**: Đồng bộ đầy đủ các siêu dữ liệu tiêu chuẩn (applicability, evidence levels, severity, source mappings, acceptance criteria) vào schema database, thay vì chỉ lưu trữ mã tiêu chí thô.
+- [ ] **P1-02: Applicability Profiles**: Phân phối tiêu chuẩn phù hợp theo loại website (Ecommerce, Local, Publisher) và thị trường (Market/Language).
+- [ ] **P1-03: Control-Executor-Evidence Map**: Thiết lập ánh xạ chính xác giữa từng tiêu chuẩn với executor tự động (detector job) hoặc form xác thực thủ công.
+- [ ] **P1-04: Hợp nhất Auditing Entity DTOs**: Tách bạch rõ ràng cấu trúc dữ liệu của Finding (phát hiện), Evidence Artifact (bằng chứng), Root Cause (nguyên nhân gốc), Action (hành động khắc phục) và Verification (QA kiểm chứng).
+- [ ] **P1-05: Evidence Viewer & Data Lineage**: Tích hợp giao diện hiển thị bằng chứng raw (raw HTML, console errors, screenshot) và trace ngược nguồn gốc (lineage) từ số liệu hiển thị về file log hoặc API response thô.
+- [ ] **P1-06: Versioned Deterministic Rules**: Phiên bản hóa các luật tính toán (detector versioning) để đảm bảo kết quả kiểm toán lịch sử không bị ảnh hưởng khi phát hành version checker mới.
+- [ ] **P1-07: Resumable Ingestion & Audit Job**: Xây dựng bộ BullMQ Orchestrator xử lý các jobs crawl và ingestion có khả năng resume, báo cáo sự cố và ghi nhận cost thực tế.
+- [ ] **P1-08: Secure API Connectors**: Hoàn thiện cổng kết nối GSC OAuth, GA4 data analytics, PageSpeed Insights/CrUX, Web-performance và Google Business Profile API.
+- [ ] **P1-09: Tái cơ cấu Frontend**: Chia nhỏ trang `page.tsx` khổng lồ thành cấu trúc thư mục dạng Module (overview, crawl, audits, findings, actions...), tích hợp typed API client tự động sinh từ Swagger/OpenAPI.
+- [ ] **P1-10: E2E Integration Coverage**: Bổ sung integration test tích hợp ClickHouse và MinIO S3 thô cho các detector.
+- [ ] **P1-11: Loại bỏ Hard Thresholds trong Detectors**: Điều chỉnh các quy tắc cứng nhắc (như giới hạn 60/160 ký tự cho title/meta) sang dạng cảnh báo (warning/opportunity) hoặc đo đạc qua pixel width thực tế.
+- [ ] **P1-12: Pin Dependency & Docker Version**: Khóa cố định các tag version của Docker images và package dependency.
 
-### EPIC P0-06 — Standards Audit Engine
+- **Acceptance Gate:** Chạy thành công chuỗi workflow hoàn chỉnh: Connect sources → Crawl/Ingest → Control execution → Evidence generated → Findings logged → Action created.
 
-- [ ] Applicability engine theo website type/market/features.
-- [ ] Audit run generator.
-- [ ] Detector registry/versioning/fixtures.
-- [ ] Cross-source detectors.
-- [ ] Manual verification forms.
-- [ ] Result state machine và reviewer workflow.
-- [ ] Finding aggregation/deduplication.
-- [ ] Coverage/progress/severity dashboards.
-- [ ] Evidence pack export.
-- **Acceptance:** checklist Core chạy end-to-end và tạo findings có evidence.
+---
 
-### EPIC P0-07 — Action Center
+### Phase 2 — Technical SEO Audit MVP
 
-- [ ] Unified action schema và lifecycle.
-- [ ] Convert/merge findings → action.
-- [ ] Assignment, priority, due date, dependencies và recurrence.
-- [ ] Comments, attachments, internal/client visibility.
-- [ ] Approval/rejection/risk acceptance.
-- [ ] QA/verification records và rollback note.
-- [ ] Monitoring date và measurement review.
-- [ ] Saved views, bulk actions, notifications và overdue alerts.
-- [ ] Workload/capacity view.
-- **Acceptance:** một finding đi từ detect đến Done và measurement không dùng tracker ngoài.
+**Mục tiêu:** Cung cấp giải pháp Technical Audit tự động hóa, chính xác, có bằng chứng đầy đủ so với SEO checklist.
 
-### EPIC P0-08 — Measurement Foundation
+- [ ] Thu thập dữ liệu kỹ thuật: redirect chains, sitemaps index, canonical clusters, robot directives.
+- [ ] Chromium remote rendering queue: chụp ảnh màn hình DOM, log errors console, check parity so với raw HTML.
+- [ ] Phát hiện tranh chấp canonical và parameter/facet URL.
+- [ ] Tích hợp Core Web Vitals lab and field metrics.
+- [ ] UI so sánh sự thay đổi code của site qua các lần chạy (Release regression and code diff).
 
-- [ ] KPI dictionary và project objectives.
-- [ ] GSC Search Analytics ingestion theo date/query/page/country/device.
-- [ ] GA4 Data API ingestion theo approved report definitions.
-- [ ] CRM/backend import connector interface.
-- [ ] Annotation timeline.
-- [ ] Brand/non-brand rule engine.
-- [ ] Baseline/target and data-quality UI.
-- [ ] Before/after comparison service.
-- **Acceptance:** dashboard nối visibility → qualified traffic → conversion/revenue với source rõ.
+- **Acceptance Gate:** Độ phủ Technical controls tự động đạt > 90% với fixtures test cụ thể.
 
-### EPIC P0-09 — Observability, Backup và Cost Safety
+---
 
-- [ ] Correlation ID API→queue→worker→collector→storage.
-- [ ] OpenTelemetry, structured logs, metrics, error tracking.
-- [x] DLQ, authorized replay và runbook.
-- [ ] Cost ledger per workspace/project/source.
-- [x] Budget threshold và hard stop.
-- [ ] Postgres/ClickHouse/S3 backup và restore drill.
-- [ ] Graceful shutdown, deploy smoke test và rollback.
-- **Acceptance:** truy vết job, phục hồi backup và chặn vượt ngân sách.
+### Phase 3 — Data, Measurement và Content
 
-### EPIC P1-01 — Keyword & SERP Intelligence
+**Mục tiêu:** Đo lường traffic, ranking, doanh thu và vận hành bộ máy sản xuất bài viết (Content Operations).
 
-- [ ] Keyword source connectors/import.
-- [ ] Normalization và brand rules.
-- [ ] SERP/rank collection country/device.
-- [ ] Intent/cluster workspace và AI-assisted review.
-- [ ] Keyword-to-URL mapping.
-- [ ] Cannibalization/URL switching detector.
-- [ ] Competitor/gap reports.
-- [ ] Opportunity score configuration.
-- [ ] Rank history, feature distribution và share of visibility.
-- **Acceptance:** research→map→track→action trong một UI.
+- [ ] Đồng bộ GA4 transaction/events và mapping URL mục tiêu.
+- [ ] Quản lý danh mục Keyword, SERP tracking theo country/device/intent và opportunity scoring.
+- [ ] Intent/cluster workspace hỗ trợ lập cấu trúc từ khóa.
+- [ ] Content Inventory hỗ trợ đưa ra quyết định Keep/Update/Redirect/Remove.
+- [ ] Evidence-backed Brief Builder và AI gateway ghi nhận cost/usage thực tế.
+- [ ] CMS connectors hỗ trợ xuất bản bản nháp.
 
-### EPIC P1-02 — Content Center
+- **Acceptance Gate:** Dashboard đo lường được visbility -> traffic -> conversions cùng annotation của releases.
 
-- [ ] Unified content inventory.
-- [ ] Content performance join.
-- [ ] Keep/Update/Merge/Redirect/Remove/Create workflow.
-- [ ] Topic map và calendar.
-- [ ] Evidence-backed brief builder.
-- [ ] Draft/version/review/approval.
-- [ ] SEO/editorial/legal/accessibility checklists.
-- [ ] AI gateway với prompt/model/cost/provenance.
-- [ ] CMS connector SDK: read, preview, optional publish.
-- [ ] Post-publish QA và decay monitoring.
-- **Acceptance:** content từ opportunity đến measured outcome trong hệ thống.
+---
 
-### EPIC P1-03 — Authority & Digital PR
+### Phase 4 — Specialized SEO và Authority
 
-- [ ] Backlink provider abstraction.
-- [ ] Referring-domain/backlink inventory và history.
-- [ ] Prospect/campaign/outreach pipeline.
-- [ ] Theme–Trust–Traffic scoring có fields và reviewer.
-- [ ] Brand-safety and link-policy checks.
-- [ ] Placement verification crawler.
-- [ ] Lost-link and reclaim workflow.
-- [ ] Campaign outcome dashboard.
-- **Acceptance:** campaign có đầy đủ approval, placement evidence và outcome.
+**Mục tiêu:** Đóng gói các tính năng SEO chuyên sâu phục vụ doanh nghiệp local, sàn TMĐT và chiến dịch làm PR/Backlinks.
 
-### EPIC P1-04 — Local SEO
+- [ ] **Local SEO Hub**: Đồng bộ và quản trị GBP, tự động hiển thị ranking grid theo kinh độ/vĩ độ.
+- [ ] **Ecommerce SEO module**: Tự động rà soát product schema, variant availability, price, check merchant center feed.
+- [ ] **International SEO**: Rà soát, xây dựng đồ thị hreflang cluster đa thị trường.
+- [ ] **Authority & Outreach**: Rà soát backlink, kiểm định vị trí đặt link (placement verification crawler), đánh giá theme/trust/traffic của domain đối tác.
 
-- [ ] GBP OAuth/accounts/locations sync.
-- [ ] Location/profile completeness và policy checklist.
-- [ ] Reviews list/reply workflow với permissions.
-- [ ] GBP performance ingestion.
-- [ ] Store-page crawl/content/schema mapping.
-- [ ] Local rank grid/provider abstraction.
-- [ ] Calls/directions/website/local conversion reporting.
-- **Acceptance:** agency quản lý location, review, page và performance trong một hub.
+---
 
-### EPIC P1-05 — Ecommerce & International
+### Phase 5 — Agency Operations
 
-- [ ] Ecommerce template/facet/product/variant models.
-- [ ] Merchant/feed import và page consistency detectors.
-- [ ] Availability/price/schema checks.
-- [ ] Ecommerce GA4 reports và revenue joins.
-- [ ] Locale/market inventory.
-- [ ] Hreflang graph và cluster validation.
-- [ ] Market-specific rank/content reports.
-- **Acceptance:** ecommerce/international controls tự áp dụng đúng project.
+**Mục tiêu:** Biến hệ thống thành hệ điều hành quản lý công việc và báo cáo khách hàng tự động của Agency.
 
-### EPIC P1-06 — Reports & Client Portal
-
-- [ ] Report component library.
-- [ ] Client-visible filtering.
-- [ ] Narrative blocks with data citations.
-- [ ] AI draft không được thay metric/evidence.
-- [ ] Preview/approval/versioning.
-- [ ] Secure link/PDF/email schedule.
-- [ ] White label và accessibility.
-- [ ] Report delivery/open audit.
-- **Acceptance:** monthly report tạo từ nguồn hệ thống, không copy thủ công.
-
-### EPIC P2-01 — CMS/CRM Connector Ecosystem
-
-- [ ] Connector SDK contract.
-- [ ] WordPress first-party connector.
-- [ ] Shopify connector.
-- [ ] Magento connector.
-- [ ] Generic webhook/CSV/SFTP connector.
-- [ ] Read vs write scopes và approval.
-- [ ] Preview/diff/rollback cho publish.
-- [ ] Connector certification tests.
-- **Acceptance:** connector lỗi không ảnh hưởng nguồn khác; write-back luôn có approval/audit.
-
-### EPIC P2-02 — Automation và AI Assistant
-
-- [ ] Agent chỉ truy cập tools theo RBAC và project scope.
-- [ ] Read-only mặc định; write cần approval.
-- [ ] Suggested action phải có source/evidence/confidence.
-- [ ] Prompt injection defense cho crawled content.
-- [ ] Budget/quota/model routing.
-- [ ] Evaluation fixtures và hallucination tests.
-- [ ] Full action audit trail.
-- **Acceptance:** AI không tạo metric/finding giả và không tự publish ngoài quyền.
+- [ ] Client Portal hỗ trợ xem báo cáo, duyệt đề xuất thay đổi.
+- [ ] Quản lý RACI/SLA và năng lực sản xuất của đội ngũ (Workload/capacity).
+- [ ] Tạo báo cáo định kỳ tự động dạng kéo thả (white label).
+- [ ] Tích hợp CMS write-back connectors (WordPress, Shopify) đi kèm cơ chế kiểm duyệt chặt chẽ.
+- [ ] Kết nối các phần mềm quản trị ngoài (Jira, ClickUp, Asana).
 
 ---
 
@@ -669,49 +567,57 @@ Mọi endpoint thực thi server-side tenant scope, RBAC, audit log và idempote
 
 ### Internal Alpha
 
-- P0-01 đến P0-07 hoàn thành.
-- GSC + crawl + audit + action end-to-end.
-- Tenant/security suite pass.
-- Raw artifact lineage và replay verified.
+- 100% Phase 0 (Security Stabilization - P0-01 đến P0-10) hoàn thành và được kiểm chứng.
+- Luồng Google Search Console + Crawl + Audit + Action hoạt động thực tế (không dùng mock/fallback dummy data trong code path).
+- Bộ suite Tenant / Project level isolation và Role matrix test pass 100% (không có fail-open).
+- Core database migrations được áp dụng thành công.
 
 ### Agency Pilot
 
-- P0-08/P0-09 và Keyword/Content MVP hoàn thành.
-- 5–10 projects thật, nhiều website type.
-- First value <15 phút nếu nguồn sẵn sàng.
-- Không Critical data leakage/cost overrun.
-- ≥80% findings P0/P1 có evidence đầy đủ.
+- Phase 1 (Audit Data Model - P1-01 đến P1-12) cùng các core modules cho Technical SEO, Google Search Console, Keyword / Content MVP hoàn thành.
+- Đã chạy thử nghiệm trên ít nhất 5-10 dự án thực tế với nhiều loại website và ngôn ngữ.
+- Đạt chỉ số First-Value-Time < 15 phút từ lúc kết nối nguồn dữ liệu đến lúc xuất kết quả findings/evidence.
+- Zero Critical data leakage & zero cost overruns (kiểm soát chặt chẽ ngân sách/quota của third-party APIs).
+- Trên 80% findings cấp P0/P1 trong quá trình Audit được liên kết đầy đủ và hiển thị minh bạch evidence (raw data / metrics raw).
 
 ### Commercial Beta
 
-- Core modules, reports và client portal hoạt động.
-- Backup/restore/rollback/on-call runbooks diễn tập.
-- Plan/entitlement/quota động.
-- Unit economics được phê duyệt.
-- Legal/vendor/API terms review hoàn thành.
+- Toàn bộ Core Modules hoạt động ổn định và tích hợp mượt mà ở giao diện Frontend/Admin (có Route và Features scoped riêng biệt).
+- Đóng gói đầy đủ các Report component và Client Portal cho phép khách hàng trực tiếp xem, phản hồi và duyệt các Actions.
+- Kịch bản Disaster Recovery (Backup/Restore/Rollback) đã được diễn tập thành công trên môi trường hạ tầng thật.
+- Module quota, entitlement, rate limits, và billing plans hoạt động tin cậy.
+- Kiểm duyệt pháp lý và điều khoản đối tác hoàn thành (Legal / API Vendor terms review).
 
 ---
 
-## 12. Các điểm cần sửa trong kế hoạch cũ
+## 12. Định nghĩa hoàn thành tính năng (DoD - Definition of Done)
 
-1. `PROJECT-EXECUTION-PLAN.md` cũ tập trung Site Audit/Rank/Action nhưng chưa có Standards Registry và applicability engine.
-2. Chưa tách observation → finding → action → verification → measurement thành entity rõ.
-3. Chưa mô tả Unified Integration Control Plane đủ để thay việc mở công cụ ngoài.
-4. Content, Authority, Local, Ecommerce, International và Measurement chưa có đặc tả feature sâu.
-5. Một số hạng mục đánh dấu Done dù dependency đang In progress hoặc checklist con chưa hoàn tất.
-6. Metadata owner/next decision/risk/evidence chưa được áp dụng nhất quán cho mọi P0/P1.
-7. Chưa có connector capability/limitation matrix và API quota/cost model.
-8. Chưa có plan cho manual verification trong trường hợp API không hỗ trợ.
-9. Chưa có standard version migration và audit reproducibility.
-10. Release gates cần đo workflow hoàn chỉnh, không chỉ build/test package.
+Một tính năng hoặc epic của MavrykSEO chỉ được đánh giá là ĐÃ HOÀN THÀNH (Done) khi đáp ứng đầy đủ các tiêu chuẩn khắt khe sau:
+
+1. **Về Security**:
+   - Không chứa bất kỳ lỗ hổng bảo mật P0/Critical nào theo threat model.
+   - Mọi API endpoint thay đổi dữ liệu (mutation) đều được bảo vệ bằng guards an toàn (Auth, Tenant, Project).
+   - Rõ ràng trong việc phân quyền hiển thị client-facing (ví dụ: ẩn/mã hóa các trường nội bộ `internalNotes` đối với client/viewer).
+2. **Về Code & Architecture**:
+   - Toàn bộ codebase đạt chuẩn TypeScript strict mode.
+   - Loại bỏ hoàn toàn mock data/evidence trong runtime path của môi trường production. Khi thiếu dữ liệu nguồn, bắt buộc báo trạng thái `NEED_DATA`.
+   - Có error handling rõ ràng, không swallow exception và không duplicate logic nghiệp vụ.
+3. **Về Testing & Quality**:
+   - Tỷ lệ bao phủ kiểm thử đơn vị ổn định, có integration/E2E test suite đi kèm với các fixtures chuẩn (chặn các lỗi false positive do hard length limit).
+   - Unit tests và build build-check của package/monorepo pass hoàn chỉnh.
+4. **Về Observability**:
+   - Mọi luồng xử lý nền (background jobs) hay API requests đều được gắn kết Correlation ID để trace-ability.
+   - Ghi nhận nhật ký audit trail cụ thể cho các hành động nhạy cảm hoặc thay đổi trạng thái findings/actions/approvals.
+5. **Về Governance & Documentation**:
+   - Standard version được snapshot bất biến vào Audit Runs.
+   - Mọi thay đổi dữ liệu / tích hợp đều có thông tin data provenance (freshness, metadata) rõ ràng.
 
 ---
 
-## 13. Quy tắc quản lý file và task từ nay
+## 13. Quy tắc quản lý file và kế hoạch thực thi (Rule of Engagement)
 
-- File này là canonical **product/engineering plan**.
-- `MASTER-SEO-OPERATING-STANDARD-2026.md` là canonical **business/control standard**.
-- Không tạo checklist nghiệp vụ mới ngoài standard; thay đổi bằng version.
-- Không tạo tracker riêng ngoài Action Center; GitHub issues/PR chỉ là implementation evidence.
-- Mỗi epic khi bắt đầu phải thêm owner, next decision, dependency, risk, target và evidence.
-- Trạng thái Done chỉ hợp lệ khi acceptance, security, test, observability, docs và rollback đã pass.
+- Tài liệu `PROJECT-EXECUTION-PLAN.md` này là nguồn sự thật duy nhất (Canonical Product/Engineering Plan).
+- Tài liệu `MASTER-SEO-OPERATING-STANDARD-2026.md` là nguồn sự thật nghiệp vụ (Canonical Control Standard).
+- Mọi nghiệp vụ / tiêu chuẩn bắt buộc phải được định nghĩa trong Standard trước khi đưa vào code; thay đổi/nâng cấp tiêu chuẩn bằng cách phiên bản hóa (versioning).
+- Không tạo tracker độc lập bên ngoài Action Center; các issues/PR chỉ dùng làm bằng chứng triển khai.
+- Khi bắt đầu thực thi bất kỳ Epic/Phase nào, phải chuẩn bị đầy đủ Owner, Next Decisions, Dependencies, Risks, Targets và Evidence.

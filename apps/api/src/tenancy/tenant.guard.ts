@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
-import { db, memberships, workspaces } from '@seo/db';
-import { eq, and } from 'drizzle-orm';
+import { db, memberships, workspaces, supportSessions } from '@seo/db';
+import { eq, and, gt } from 'drizzle-orm';
 
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -20,6 +20,7 @@ export class TenantGuard implements CanActivate {
     }
 
     // Verify membership in the database
+    let userRole: string | null = null;
     const existing = await db
       .select()
       .from(memberships)
@@ -31,8 +32,31 @@ export class TenantGuard implements CanActivate {
       )
       .limit(1);
 
-    if (existing.length === 0) {
-      throw new ForbiddenException('User does not belong to this workspace');
+    if (existing.length > 0) {
+      userRole = existing[0].role;
+    } else {
+      // Fallback: Check if there is an active support session for this user & workspace
+      const [session] = await db
+        .select()
+        .from(supportSessions)
+        .where(
+          and(
+            eq(supportSessions.userId, user.id),
+            eq(supportSessions.workspaceId, workspaceId),
+            gt(supportSessions.expiresAt, new Date())
+          )
+        )
+        .limit(1);
+
+      if (!session) {
+        throw new ForbiddenException('User does not belong to this workspace');
+      }
+
+      // Valid support session active! Grant temporary admin role
+      userRole = 'admin';
+      request['isSupportSession'] = true;
+      request['supportSessionId'] = session.id;
+      request['supportReason'] = session.reason;
     }
 
     // Verify workspace plan & status
@@ -55,7 +79,7 @@ export class TenantGuard implements CanActivate {
 
     // Inject active tenancy information into the request
     request['workspaceId'] = workspaceId;
-    request['userRole'] = existing[0].role;
+    request['userRole'] = userRole;
     request['workspacePlan'] = activeWorkspace.plan;
     request['workspace'] = activeWorkspace;
 

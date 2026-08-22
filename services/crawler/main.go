@@ -130,6 +130,9 @@ func init() {
 
 // isForbiddenIP returns true if the IP matches any private/forbidden range.
 func isForbiddenIP(ip net.IP) bool {
+	if os.Getenv("CRAWLER_ENV") == "sandbox" || os.Getenv("CRAWLER_ENV") == "development" {
+		return false
+	}
 	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
@@ -227,11 +230,15 @@ func validateOutboundURL(rawURL string) (*url.URL, error) {
 
 	hostname := strings.ToLower(parsed.Hostname())
 	if hostname == "localhost" || strings.HasSuffix(hostname, ".localhost") {
-		return nil, fmt.Errorf("SSRF protection: localhost targets are not allowed")
+		if os.Getenv("CRAWLER_ENV") != "sandbox" && os.Getenv("CRAWLER_ENV") != "development" {
+			return nil, fmt.Errorf("SSRF protection: localhost targets are not allowed")
+		}
 	}
 
 	if !isAllowedOutboundHost(hostname) {
-		return nil, fmt.Errorf("outbound URL host is not permitted by policy")
+		if os.Getenv("CRAWLER_ENV") != "sandbox" && os.Getenv("CRAWLER_ENV") != "development" {
+			return nil, fmt.Errorf("outbound URL host is not permitted by policy")
+		}
 	}
 
 	if parsed.User != nil {

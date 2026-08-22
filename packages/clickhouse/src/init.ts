@@ -59,7 +59,13 @@ export async function initializeClickHouse() {
       page_size_bytes UInt32,
       word_count UInt32,
       issues Array(String),
-      canonical_url String
+      canonical_url String,
+      job_run_id String,
+      observed_at DateTime,
+      ingested_at DateTime,
+      schema_version String,
+      algorithm_version String,
+      source_origin String
     ) ENGINE = MergeTree()
     ORDER BY (site_id, timestamp, url)`,
 
@@ -70,7 +76,15 @@ export async function initializeClickHouse() {
       rank UInt8,
       search_volume UInt32,
       url String,
-      competitor_domain String
+      competitor_domain String,
+      device String,
+      country String,
+      job_run_id String,
+      observed_at DateTime,
+      ingested_at DateTime,
+      schema_version String,
+      algorithm_version String,
+      source_origin String
     ) ENGINE = MergeTree()
     ORDER BY (project_id, timestamp, keyword)`
   ];
@@ -82,6 +96,7 @@ export async function initializeClickHouse() {
     } catch (error) {
       console.error(`Error running query: ${query}`, error);
       throw error;
+      return;
     }
   }
 
@@ -92,6 +107,37 @@ export async function initializeClickHouse() {
       query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS canonical_url String`,
     });
     console.log('Successfully updated crawl_page_observations schema.');
+
+    console.log(`Running ClickHouse schema migration for rank_observations device/country...`);
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.rank_observations ADD COLUMN IF NOT EXISTS device String`,
+    });
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.rank_observations ADD COLUMN IF NOT EXISTS country String`,
+    });
+    console.log('Successfully updated rank_observations schema.');
+
+    console.log(`Running ClickHouse schema migration for shared lineage columns...`);
+    const tablesToAlter = [
+      `${targetDb}.crawl_page_observations`,
+      `${targetDb}.rank_observations`
+    ];
+    const columnsToAdd = [
+      'job_run_id String',
+      'observed_at DateTime',
+      'ingested_at DateTime',
+      'schema_version String',
+      'algorithm_version String',
+      'source_origin String'
+    ];
+    for (const table of tablesToAlter) {
+      for (const col of columnsToAdd) {
+        await clickhouse.exec({
+          query: `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col}`,
+        });
+      }
+    }
+    console.log('Successfully updated shared lineage columns in ClickHouse.');
   } catch (error) {
     console.warn(`ClickHouse migration warning: ${(error as any).message}`);
   }

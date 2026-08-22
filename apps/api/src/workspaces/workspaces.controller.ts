@@ -85,4 +85,12 @@ export class WorkspacesController {
   async getWhiteLabel(@CurrentWorkspace() workspaceId: string) {
     return this.workspacesService.getWorkspaceWhiteLabel(workspaceId);
   }
+
+  @Get('active/audit-logs')
+  @AuditLog('workspace.audit_logs.read', 'workspace')
+  @UseGuards(TenantGuard, RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async getAuditLogs(@CurrentWorkspace() workspaceId: string) {
+    return this.workspacesService.getAuditLogs(workspaceId);
+  }
 }

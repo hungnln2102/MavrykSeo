@@ -27,4 +27,13 @@ export class JobsController {
   ) {
     return this.jobsService.replayFailedJob(workspaceId, jobRunId);
   }
+
+  @Post(':jobRunId/reprocess')
+  @AuditLog('job.reprocess', 'job_run')
+  async reprocessJob(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('jobRunId') jobRunId: string,
+  ) {
+    return this.jobsService.reprocessJob(workspaceId, jobRunId);
+  }
 }

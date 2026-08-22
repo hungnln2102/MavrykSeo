@@ -2,12 +2,13 @@ import { Controller, Post, Get, Delete, Body, Param, Query, UseGuards } from '@n
 import { KeywordsService } from './keywords.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
+import { ProjectGuard } from '../tenancy/project.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 
 @Controller('projects/:projectId')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, ProjectGuard)
 export class KeywordsController {
   constructor(private readonly keywordsService: KeywordsService) {}
 

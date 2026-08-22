@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { db, jobRuns, keywords, projects } from '@seo/db';
+import { db, jobRuns, keywords, projects, workspaces, systemConfigs } from '@seo/db';
 import { clickhouse } from '@seo/clickhouse';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { MetricsService } from '../metrics/metrics.service';
 import { createJobEnvelope, RankJobData } from '@seo/core';
@@ -55,6 +55,54 @@ export class KeywordsService {
       return existing[0];
     }
 
+    // Check keyword limit based on workspace plan
+    const workspaceResult = await db
+      .select({ plan: workspaces.plan })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+
+    if (workspaceResult.length === 0) {
+      throw new NotFoundException('Workspace not found');
+    }
+
+    const plan = workspaceResult[0].plan || 'free';
+    const configKey = `keyword_limit_${plan}`;
+
+    const limitResult = await db
+      .select({ value: systemConfigs.value })
+      .from(systemConfigs)
+      .where(eq(systemConfigs.key, configKey))
+      .limit(1);
+
+    let limit = 999999;
+    if (limitResult.length > 0) {
+      limit = parseInt(limitResult[0].value, 10);
+    } else {
+      limit = plan === 'free' ? 5 : plan === 'pro' ? 100 : 1000;
+    }
+
+    // Sum all current keywords in this workspace
+    const workspaceProjects = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.workspaceId, workspaceId));
+
+    const projectIds = workspaceProjects.map(p => p.id);
+    let currentKeywordsCount = 0;
+
+    if (projectIds.length > 0) {
+      const countResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(keywords)
+        .where(inArray(keywords.projectId, projectIds));
+      currentKeywordsCount = countResult[0]?.count || 0;
+    }
+
+    if (currentKeywordsCount >= limit) {
+      throw new BadRequestException(`Keyword quota reached. Limit: ${limit}. Current: ${currentKeywordsCount}`);
+    }
+
     const [newKeyword] = await db
       .insert(keywords)
       .values({
@@ -68,66 +116,72 @@ export class KeywordsService {
       .returning();
 
     // 3. Trigger immediate rank tracking job in BullMQ
-    if (this.queue) {
-      const envelope = createJobEnvelope('rank.requested', [workspaceId, projectId, keywordLower]);
-        const jobData: RankJobData = {
-          ...envelope,
-          workspaceId,
-          projectId,
-          query: keywordLower,
-          numResults: 20,
-          ingestionKey: envelope.idempotencyKey,
-      };
-      let jobRunRecorded = false;
-
-      try {
-        await db.insert(jobRuns).values({
-          workspaceId,
-          projectId,
-          queueName: 'collector-queue',
-          jobName: 'rank.requested',
-          bullmqJobId: envelope.idempotencyKey,
-          idempotencyKey: envelope.idempotencyKey,
-          correlationId: envelope.correlationId,
-          state: 'queued',
-          attemptCount: 0,
-          maxAttempts: 3,
-          ingestionKey: envelope.idempotencyKey,
-          payload: jobData,
-        }).onConflictDoUpdate({
-          target: [jobRuns.workspaceId, jobRuns.idempotencyKey],
-          set: {
-            state: 'queued',
-            errorCode: null,
-            errorMessage: null,
-            failedAt: null,
-            updatedAt: new Date(),
-          },
-        });
-        jobRunRecorded = true;
-
-        await this.queue.add('rank.requested', jobData, {
-          jobId: envelope.idempotencyKey,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 1000 },
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
-        });
-      } catch (err) {
-        if (jobRunRecorded) {
-          await db.update(jobRuns).set({
-            state: 'failed',
-            errorCode: 'queue_dispatch_failed',
-            errorMessage: 'Unable to dispatch rank job to the queue',
-            failedAt: new Date(),
-            updatedAt: new Date(),
-          }).where(and(eq(jobRuns.workspaceId, workspaceId), eq(jobRuns.idempotencyKey, envelope.idempotencyKey)));
-        }
-        console.error('Failed to enqueue rank.requested job:', err instanceof Error ? err.message : 'Unknown error');
-      }
-    }
+    await this.triggerRankSync(workspaceId, projectId, keywordLower);
 
     return newKeyword;
+  }
+
+  async triggerRankSync(workspaceId: string, projectId: string, keywordStr: string) {
+    const keywordLower = keywordStr.trim().toLowerCase();
+    if (!this.queue) return;
+
+    const envelope = createJobEnvelope('rank.requested', [workspaceId, projectId, keywordLower]);
+    const jobData: RankJobData = {
+      ...envelope,
+      workspaceId,
+      projectId,
+      query: keywordLower,
+      numResults: 20,
+      ingestionKey: envelope.idempotencyKey,
+    };
+    let jobRunRecorded = false;
+
+    try {
+      await db.insert(jobRuns).values({
+        workspaceId,
+        projectId,
+        queueName: 'collector-queue',
+        jobName: 'rank.requested',
+        bullmqJobId: envelope.idempotencyKey,
+        idempotencyKey: envelope.idempotencyKey,
+        correlationId: envelope.correlationId,
+        state: 'queued',
+        attemptCount: 0,
+        maxAttempts: 3,
+        ingestionKey: envelope.idempotencyKey,
+        payload: jobData,
+      }).onConflictDoUpdate({
+        target: [jobRuns.workspaceId, jobRuns.idempotencyKey],
+        set: {
+          state: 'queued',
+          errorCode: null,
+          errorMessage: null,
+          failedAt: null,
+          updatedAt: new Date(),
+        },
+      });
+      jobRunRecorded = true;
+
+      await this.queue.add('rank.requested', jobData, {
+        jobId: envelope.idempotencyKey,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      });
+      console.log(`Dispatched rank tracking job for keyword: ${keywordLower}`);
+    } catch (err) {
+      if (jobRunRecorded) {
+        await db.update(jobRuns).set({
+          state: 'failed',
+          errorCode: 'queue_dispatch_failed',
+          errorMessage: 'Unable to dispatch rank job to the queue',
+          failedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(and(eq(jobRuns.workspaceId, workspaceId), eq(jobRuns.idempotencyKey, envelope.idempotencyKey)));
+      }
+      console.error('Failed to enqueue rank.requested job:', err instanceof Error ? err.message : 'Unknown error');
+    }
   }
 
   async getKeywords(workspaceId: string, projectId: string) {
@@ -157,7 +211,8 @@ export class KeywordsService {
       SELECT 
         keyword,
         argMax(rank, timestamp) as latest_rank,
-        argMax(url, timestamp) as url
+        argMax(url, timestamp) as url,
+        max(timestamp) as latest_timestamp
       FROM ${clickhouseDb}.rank_observations
       WHERE project_id = '${projectId}' AND competitor_domain = ''
       GROUP BY keyword
@@ -171,22 +226,34 @@ export class KeywordsService {
       console.error('Failed to query ClickHouse rank observations:', err.message);
     }
 
-    const rankingMap = new Map<string, { rank: number; url: string }>();
+    const rankingMap = new Map<string, { rank: number; url: string; timestamp: Date | null }>();
     for (const r of chRankings) {
       rankingMap.set(r.keyword.toLowerCase().trim(), {
         rank: Number(r.latest_rank),
         url: r.url,
+        timestamp: r.latest_timestamp ? new Date(r.latest_timestamp) : null,
       });
     }
 
+    const now = new Date();
     // Merge latest rankings into tracked keywords
     return trackedKeywords.map((kw) => {
       const kwNormalized = kw.keyword.toLowerCase().trim();
       const rankData = rankingMap.get(kwNormalized);
+      const latestTimestamp = rankData?.timestamp;
+      let isStale = false;
+      if (latestTimestamp) {
+        const diffMs = now.getTime() - latestTimestamp.getTime();
+        isStale = diffMs > 24 * 60 * 60 * 1000;
+      } else {
+        isStale = true;
+      }
       return {
         ...kw,
         latestRank: rankData ? rankData.rank : null,
         detectedUrl: rankData ? rankData.url : null,
+        isStale,
+        lastTrackedAt: latestTimestamp ? latestTimestamp.toISOString() : null,
       };
     });
   }

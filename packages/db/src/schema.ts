@@ -234,3 +234,160 @@ export const ingestionFences = pgTable('ingestion_fences', {
 }));
 export type IngestionFence = typeof ingestionFences.$inferSelect;
 export type NewIngestionFence = typeof ingestionFences.$inferInsert;
+
+export const gscOauthStates = pgTable('gsc_oauth_states', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  stateHash: text('state_hash').notNull().unique(),
+  encryptedCodeVerifier: text('encrypted_code_verifier').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  consumedAt: timestamp('consumed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  workspaceProjectIdx: index('gsc_oauth_states_workspace_project_idx').on(table.workspaceId, table.projectId),
+  expiresAtIdx: index('gsc_oauth_states_expires_at_idx').on(table.expiresAt),
+}));
+export type GscOauthState = typeof gscOauthStates.$inferSelect;
+export type NewGscOauthState = typeof gscOauthStates.$inferInsert;
+
+export const gscSyncStates = pgTable('gsc_sync_states', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }).unique(),
+  state: text('state').default('property_selected').notNull(),
+  lastSuccessfulSyncAt: timestamp('last_successful_sync_at'),
+  lastSyncStartedAt: timestamp('last_sync_started_at'),
+  lastSyncStartDate: text('last_sync_start_date'),
+  lastSyncEndDate: text('last_sync_end_date'),
+  lastErrorCode: text('last_error_code'),
+  lastErrorMessage: text('last_error_message'),
+  retryCount: integer('retry_count').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  workspaceStateIdx: index('gsc_sync_states_workspace_state_idx').on(table.workspaceId, table.state),
+}));
+export type GscSyncState = typeof gscSyncStates.$inferSelect;
+export type NewGscSyncState = typeof gscSyncStates.$inferInsert;
+
+export const systemConfigs = pgTable('system_configs', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type SystemConfig = typeof systemConfigs.$inferSelect;
+export type NewSystemConfig = typeof systemConfigs.$inferInsert;
+
+export const standardVersions = pgTable('standard_versions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  version: text('version').notNull().unique(),
+  effectiveAt: timestamp('effective_at').notNull(),
+  status: text('status').default('draft').notNull(),
+  sourceManifestHash: text('source_manifest_hash').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type StandardVersion = typeof standardVersions.$inferSelect;
+export type NewStandardVersion = typeof standardVersions.$inferInsert;
+
+export const standardSources = pgTable('standard_sources', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  code: text('code').notNull().unique(),
+  name: text('name').notNull(),
+  url: text('url'),
+  authorityLevel: text('authority_level').notNull(),
+  reviewedAt: timestamp('reviewed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type StandardSource = typeof standardSources.$inferSelect;
+export type NewStandardSource = typeof standardSources.$inferInsert;
+
+export const auditModules = pgTable('audit_modules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  code: text('code').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type AuditModule = typeof auditModules.$inferSelect;
+export type NewAuditModule = typeof auditModules.$inferInsert;
+
+export const auditControls = pgTable('audit_controls', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  versionId: uuid('version_id').notNull().references(() => standardVersions.id, { onDelete: 'cascade' }),
+  moduleId: uuid('module_id').notNull().references(() => auditModules.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  phase: text('phase').notNull(),
+  description: text('description').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqControlVersion: unique('uniq_control_version').on(table.versionId, table.code),
+}));
+export type AuditControl = typeof auditControls.$inferSelect;
+export type NewAuditControl = typeof auditControls.$inferInsert;
+
+export const controlSources = pgTable('control_sources', {
+  controlId: uuid('control_id').notNull().references(() => auditControls.id, { onDelete: 'cascade' }),
+  sourceId: uuid('source_id').notNull().references(() => standardSources.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: unique('uniq_control_source').on(table.controlId, table.sourceId),
+}));
+export type ControlSource = typeof controlSources.$inferSelect;
+export type NewControlSource = typeof controlSources.$inferInsert;
+
+export const auditRuns = pgTable('audit_runs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  standardVersionId: uuid('standard_version_id').notNull().references(() => standardVersions.id),
+  status: text('status').default('active').notNull(),
+  scopeSnapshot: jsonb('scope_snapshot'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type AuditRun = typeof auditRuns.$inferSelect;
+export type NewAuditRun = typeof auditRuns.$inferInsert;
+
+export const auditControlResults = pgTable('audit_control_results', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  auditRunId: uuid('audit_run_id').notNull().references(() => auditRuns.id, { onDelete: 'cascade' }),
+  controlId: uuid('control_id').notNull().references(() => auditControls.id, { onDelete: 'cascade' }),
+  result: text('result').default('NEED_DATA').notNull(),
+  exceptionReason: text('exception_reason'),
+  reviewerId: uuid('reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqRunControl: unique('uniq_run_control').on(table.auditRunId, table.controlId),
+}));
+export type AuditControlResult = typeof auditControlResults.$inferSelect;
+export type NewAuditControlResult = typeof auditControlResults.$inferInsert;
+
+export const projectMemberships = pgTable('project_memberships', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'lead' | 'member' | 'viewer'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqUserProject: unique('uniq_user_project').on(table.userId, table.projectId),
+}));
+export type ProjectMembership = typeof projectMemberships.$inferSelect;
+export type NewProjectMembership = typeof projectMemberships.$inferInsert;
+
+export const supportSessions = pgTable('support_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  reason: text('reason').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type SupportSession = typeof supportSessions.$inferSelect;
+export type NewSupportSession = typeof supportSessions.$inferInsert;
+
+

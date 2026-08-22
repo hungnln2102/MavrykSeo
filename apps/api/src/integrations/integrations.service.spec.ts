@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { db, projects } from '@seo/db';
+import { decryptToken } from '@seo/core';
 import { and, eq } from 'drizzle-orm';
 import { IntegrationsService } from './integrations.service';
 
@@ -41,6 +42,7 @@ describe('IntegrationsService tenant scoping', () => {
   it.each([
     ['save credentials', (instance: IntegrationsService) => instance.saveIntegration('workspace-2', 'project-1', 'gsc', { refreshToken: 'secret' })],
     ['read credentials', (instance: IntegrationsService) => instance.getIntegration('workspace-2', 'project-1', 'gsc')],
+    ['read credentials internally', (instance: IntegrationsService) => instance.getIntegrationCredentials('workspace-2', 'project-1', 'gsc')],
   ])('rejects cross-workspace project access before attempting to %s', async (_operation, execute) => {
     mockProjectLookup([]);
 
@@ -55,5 +57,28 @@ describe('IntegrationsService tenant scoping', () => {
       { type: 'eq', column: projects.workspaceId, value: 'workspace-2' },
     );
     expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns integration metadata without decrypting OAuth credentials', async () => {
+    mockSelect
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: jest.fn().mockResolvedValue([{ id: 'project-1' }]) }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: jest.fn().mockResolvedValue([{
+          id: 'integration-1',
+          provider: 'google_search_console',
+          status: 'active',
+          credentials: 'encrypted-credentials',
+          createdAt: new Date('2026-08-15T00:00:00Z'),
+          updatedAt: new Date('2026-08-15T00:00:00Z'),
+        }]) }) }),
+      });
+
+    const integration = await service.getIntegration('workspace-1', 'project-1', 'google_search_console');
+
+    expect(integration).toEqual(expect.objectContaining({ id: 'integration-1', provider: 'google_search_console' }));
+    expect(integration).not.toHaveProperty('credentials');
+    expect(decryptToken).not.toHaveBeenCalled();
   });
 });

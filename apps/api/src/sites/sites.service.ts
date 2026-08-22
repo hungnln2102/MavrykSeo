@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { db, jobRuns, sites, projects, workspaces } from '@seo/db';
-import { eq, and, count, inArray } from 'drizzle-orm';
+import { eq, and, count, inArray, desc } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { createJobEnvelope, CrawlJobData } from '@seo/core';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 
 @Injectable()
 export class SitesService {
   private queue: Queue;
+  private s3Client: S3Client;
 
   constructor() {
     const redisHost = process.env.REDIS_HOST || 'localhost';
@@ -16,6 +18,16 @@ export class SitesService {
         host: redisHost,
         port: redisPort,
       },
+    });
+
+    this.s3Client = new S3Client({
+      endpoint: process.env.S3_ENDPOINT || 'http://localhost:9002',
+      region: process.env.S3_REGION || 'us-east-1',
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY || 'minio',
+        secretAccessKey: process.env.S3_SECRET_KEY || 'minio12345',
+      },
+      forcePathStyle: true,
     });
   }
 
@@ -255,5 +267,85 @@ export class SitesService {
     }
 
     return { success: true, siteId: site.id, message: 'Crawl job enqueued successfully' };
+  }
+
+  async getSiteCrawls(workspaceId: string, siteId: string) {
+    // 1. Fetch site and verify it belongs to workspace
+    const siteResult = await db
+      .select({ projectId: sites.projectId })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    const { projectId } = siteResult[0];
+
+    // 2. Query jobRuns for crawler-queue and the projectId
+    const runs = await db
+      .select()
+      .from(jobRuns)
+      .where(and(
+        eq(jobRuns.workspaceId, workspaceId),
+        eq(jobRuns.projectId, projectId),
+        eq(jobRuns.queueName, 'crawler-queue')
+      ))
+      .orderBy(desc(jobRuns.createdAt))
+      .limit(50);
+
+    return runs;
+  }
+
+  async getCrawlRawHtml(workspaceId: string, siteId: string, jobRunId: string): Promise<string> {
+    // 1. Fetch site and verify it belongs to workspace
+    const siteResult = await db
+      .select({ projectId: sites.projectId })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    // 2. Fetch the job run record to get the ingestionKey
+    const runResult = await db
+      .select({ ingestionKey: jobRuns.ingestionKey })
+      .from(jobRuns)
+      .where(and(
+        eq(jobRuns.id, jobRunId),
+        eq(jobRuns.workspaceId, workspaceId)
+      ))
+      .limit(1);
+
+    if (runResult.length === 0) {
+      throw new NotFoundException('Crawl job run not found');
+    }
+
+    const ingestionKey = runResult[0].ingestionKey;
+    if (!ingestionKey) {
+      throw new NotFoundException('Crawl job run has no ingestion key');
+    }
+
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    const rawArtifactKey = `raw/crawl/${workspaceId}/${siteId}/${ingestionKey}/index.html`;
+
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: rawArtifactKey,
+        })
+      );
+
+      const rawHtml = await response.Body?.transformToString() || '';
+      return rawHtml;
+    } catch (err) {
+      throw new NotFoundException(`Failed to retrieve raw HTML from storage: ${err.message}`);
+    }
   }
 }

@@ -6,11 +6,13 @@ jest.mock('@seo/db', () => ({
   db: { select: jest.fn() },
   memberships: { userId: 'memberships.userId', workspaceId: 'memberships.workspaceId' },
   workspaces: { id: 'workspaces.id' },
+  supportSessions: { userId: 'supportSessions.userId', workspaceId: 'supportSessions.workspaceId', expiresAt: 'supportSessions.expiresAt' },
 }));
 
 jest.mock('drizzle-orm', () => ({
   and: jest.fn((...conditions: unknown[]) => conditions),
   eq: jest.fn((column: unknown, value: unknown) => ({ column, value })),
+  gt: jest.fn((column: unknown, value: unknown) => ({ op: 'gt', column, value })),
 }));
 
 const mockSelect = db.select as jest.Mock;
@@ -59,7 +61,7 @@ describe('TenantGuard', () => {
   });
 
   it('rejects a forged workspace that has no membership for the authenticated user', async () => {
-    mockSelectResults([]);
+    mockSelectResults([], []);
 
     await expect(
       guard.canActivate(createContext({
@@ -68,6 +70,29 @@ describe('TenantGuard', () => {
         url: '/projects',
       })),
     ).rejects.toThrow(new ForbiddenException('User does not belong to this workspace'));
+  });
+
+  it('allows access via an active support session even if user is not a workspace member', async () => {
+    mockSelectResults(
+      [], // No normal membership
+      [{ id: 'session-123', reason: 'debugging workspace' }], // Active support session
+      [{ id: 'workspace-1', plan: 'pro', status: 'active' }], // Workspace checks pass
+    );
+
+    const request = {
+      user: { id: 'user-1' },
+      headers: { 'x-workspace-id': 'workspace-1' },
+      url: '/projects',
+    };
+
+    await expect(guard.canActivate(createContext(request))).resolves.toBe(true);
+    expect(request).toMatchObject({
+      workspaceId: 'workspace-1',
+      userRole: 'admin',
+      isSupportSession: true,
+      supportSessionId: 'session-123',
+      supportReason: 'debugging workspace',
+    });
   });
 
   it('rejects a workspace ID that has no workspace record', async () => {

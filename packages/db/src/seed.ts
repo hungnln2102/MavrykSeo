@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { client, db, memberships, projects, sites, users, workspaces } from './index.js';
+import { client, db, memberships, projects, sites, users, workspaces, systemConfigs } from './index.js';
 
 const confirmation = process.env.DEMO_SEED_CONFIRMATION;
 
@@ -22,6 +22,23 @@ const demo = {
 };
 
 async function seedDemoWorkspace(): Promise<void> {
+  // Seed system_configs for keyword limits
+  const configsToSeed = [
+    { key: 'keyword_limit_free', value: '999999' },
+    { key: 'keyword_limit_pro', value: '999999' },
+    { key: 'keyword_limit_enterprise', value: '999999' },
+  ];
+
+  for (const cfg of configsToSeed) {
+    await db
+      .insert(systemConfigs)
+      .values(cfg)
+      .onConflictDoUpdate({
+        target: systemConfigs.key,
+        set: { value: cfg.value, updatedAt: new Date() },
+      });
+  }
+
   await db
     .insert(users)
     .values({ id: demo.userId, email: demo.email, name: 'Demo Owner' })

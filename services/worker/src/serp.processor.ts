@@ -4,16 +4,28 @@ import { clickhouse } from '@seo/clickhouse';
 import { db, ingestionFences, jobRuns, projects } from '@seo/db';
 import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
-import { isRetryableJobError, isValidJobEnvelope, isValidRankJobData, JobProcessingError, nonRetryableJobError, RankJobData } from '@seo/core';
-import { jobDeadLetterCounter } from './metrics';
+import { isRetryableJobError, isValidJobEnvelope, isValidRankJobData, JobProcessingError, nonRetryableJobError, retryableJobError, RankJobData } from '@seo/core';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { jobDeadLetterCounter, serpQueriesCounter, serpCostUsdCounter } from './metrics';
 
 @Injectable()
 export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
   private worker: Worker;
+  private s3Client: S3Client;
   private collectorApiUrl: string;
 
   constructor() {
     this.collectorApiUrl = process.env.COLLECTOR_API_URL || 'http://localhost:8082/collect/serp';
+    
+    this.s3Client = new S3Client({
+      endpoint: process.env.S3_ENDPOINT || 'http://localhost:9002',
+      region: process.env.S3_REGION || 'us-east-1',
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY || 'minio',
+        secretAccessKey: process.env.S3_SECRET_KEY || 'minio12345',
+      },
+      forcePathStyle: true,
+    });
   }
 
   onModuleInit() {
@@ -68,8 +80,8 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleSerpJob(job: Job<RankJobData>) {
-    const { workspaceId, projectId, query, numResults } = job.data;
-    console.log(`Processing SERP collection job ${job.id} for project: ${projectId}, query: ${query}`);
+    const { workspaceId, projectId, query, numResults, device, country } = job.data;
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
 
     if (!isValidRankJobData(job.data)) {
       throw nonRetryableJobError(
@@ -88,26 +100,124 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
       throw nonRetryableJobError('tenant_scope_violation', 'SERP job project does not belong to the requested workspace');
     }
 
-    // 1. Invoke Go Collector Service
+    // 1. Invoke Go Collector Service or S3 Reprocessor
     let serpResult;
-    try {
-      const response = await axios.post(this.collectorApiUrl, {
-        query,
-        numResults: numResults || 10,
-      });
-      serpResult = response.data;
-    } catch (error) {
-      console.error(`Go collector API request failed for query ${query}:`, error.message);
-      throw new Error(`Go Collector API failed: ${error.message}`);
-    }
+    const reprocessKey = job.data.reprocessRawArtifactKey;
 
-    if (!serpResult.success) {
-      throw new Error(`Go Collector returned failure: ${serpResult.error}`);
+    if (reprocessKey) {
+      console.log(`Reprocessing raw SERP artifact from S3 for project: ${projectId}, key: ${reprocessKey}`);
+      try {
+        const getObj = await this.s3Client.send(
+          new GetObjectCommand({
+            Bucket: bucketName,
+            Key: reprocessKey,
+          })
+        );
+        const rawJsonString = (await getObj.Body?.transformToString()) || '{}';
+        serpResult = JSON.parse(rawJsonString);
+      } catch (err: any) {
+        console.error(`S3 retrieval failed for SERP reprocessing:`, err.message);
+        throw retryableJobError('storage_failure', `Failed to retrieve raw S3 SERP content for reprocessing: ${err.message}`);
+      }
+    } else {
+      try {
+        const response = await axios.post(this.collectorApiUrl, {
+          query,
+          numResults: numResults || 10,
+          device: device || 'desktop',
+          country: country || 'US',
+        });
+        serpResult = response.data;
+      } catch (error: any) {
+        console.error(`Go collector API request failed for query ${query}:`, error.message);
+        const status = error.response?.status;
+        if (status === 403) {
+          throw nonRetryableJobError('provider_authentication_failed', `Provider authentication failed (status 403): ${error.message}`);
+        } else if (status === 429) {
+          throw retryableJobError('transient_provider_failure', `Provider rate limit exceeded (status 429): ${error.message}`);
+        } else if (status === 503 || status === 500) {
+          throw retryableJobError('transient_provider_failure', `Downstream provider failure (status ${status}): ${error.message}`);
+        }
+        throw error;
+      }
+
+      if (!serpResult.success) {
+        const providerError = serpResult.error || 'Unknown';
+        const statusCode = serpResult.status || 500;
+        if (statusCode === 403 || providerError.toLowerCase().includes('key') || providerError.toLowerCase().includes('auth')) {
+          throw nonRetryableJobError('provider_authentication_failed', `Go Collector returned auth failure: ${providerError}`);
+        } else if (statusCode === 429) {
+          throw retryableJobError('transient_provider_failure', `Go Collector returned rate limit: ${providerError}`);
+        } else {
+          throw new Error(`Go Collector returned failure: ${providerError}`);
+        }
+      }
     }
 
     console.log(`Successfully collected SERP for query '${query}'. Results count: ${serpResult.results?.length}`);
 
-    // 2. Insert rank observations to ClickHouse
+    // Update Prometheus metrics for queries and cost
+    if (!reprocessKey) {
+      serpQueriesCounter.inc({
+        workspace_id: workspaceId,
+        project_id: projectId,
+        device: device || 'desktop',
+        country: country || 'US',
+      });
+      serpCostUsdCounter.inc({
+        workspace_id: workspaceId,
+        project_id: projectId,
+      }, 0.005); // each query costs $0.005
+    }
+
+    // Fetch the actual jobRun.id for metadata tracking
+    let jobRunId = '';
+    try {
+      const jobRun = await db.select({ id: jobRuns.id })
+        .from(jobRuns)
+        .where(and(
+          eq(jobRuns.workspaceId, workspaceId),
+          eq(jobRuns.idempotencyKey, job.data.idempotencyKey)
+        ))
+        .limit(1);
+      jobRunId = jobRun[0]?.id || '';
+    } catch (err: any) {
+      console.warn(`Could not resolve jobRun.id in serp processor: ${err.message}`);
+    }
+
+    // 2. Upload raw SERP JSON to S3
+    const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
+    const rawArtifactKey = `raw/serp/${workspaceId}/${projectId}/${ingestionKey}.json`;
+
+    if (!reprocessKey) {
+      try {
+        await this.s3Client.send(
+          new PutObjectCommand({
+            Bucket: bucketName,
+            Key: rawArtifactKey,
+            Body: JSON.stringify(serpResult),
+            ContentType: 'application/json',
+            Metadata: {
+              workspace_id: workspaceId,
+              project_id: projectId,
+              ingestion_key: ingestionKey,
+              query: query,
+              results_count: String(serpResult.results?.length || 0),
+              collectedAt: new Date().toISOString(),
+              device: device || 'desktop',
+              country: country || 'US',
+              jobRunId: jobRunId,
+            },
+          }),
+        );
+        console.log(`Stored raw SERP artifact for project ${projectId} with key ${rawArtifactKey}`);
+      } catch (s3Error: any) {
+        console.error(`Failed to store raw SERP artifact in S3:`, s3Error.message);
+        throw retryableJobError('storage_failure', `Failed to upload raw SERP JSON to S3: ${s3Error.message}`);
+      }
+    }
+
+    // 3. Insert rank observations to ClickHouse
     const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
     const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -130,15 +240,23 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
         project_id: projectId,
         keyword: query,
         rank: res.position,
-        search_volume: 0,
+        search_volume: serpResult.searchVolume || 0,
         url: res.url,
         competitor_domain: competitorDomain,
+        device: device || 'desktop',
+        country: country || 'US',
+        job_run_id: jobRunId,
+        observed_at: timestampStr,
+        ingested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        schema_version: 'v1',
+        algorithm_version: reprocessKey ? 'v1.2.0-reprocessor' : 'v1.1.0-serp',
+        source_origin: reprocessKey ? 'reprocess' : 'serp',
       };
     });
 
     const shouldWriteObservations = await this.acquireIngestionFence(job);
     if (!shouldWriteObservations) {
-      console.log(`SERP ingestion already completed for key ${job.data.ingestionKey || job.data.idempotencyKey}.`);
+      console.log(`SERP ingestion already completed for key ${ingestionKey}.`);
       return;
     }
 
@@ -150,7 +268,7 @@ export class SerpProcessor implements OnModuleInit, OnModuleDestroy {
       });
       await this.completeIngestionFence(job);
       console.log(`Inserted ${observations.length} rank observations to ClickHouse for project: ${projectId}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Failed to insert rank observations to ClickHouse:`, error.message);
       throw error;
     }

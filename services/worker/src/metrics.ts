@@ -32,6 +32,18 @@ export const gscSyncLagGauge = new Gauge({
   labelNames: ['site_id'],
 });
 
+export const serpQueriesCounter = new Counter({
+  name: 'serp_queries_total',
+  help: 'Total SERP queries executed',
+  labelNames: ['workspace_id', 'project_id', 'device', 'country'],
+});
+
+export const serpCostUsdCounter = new Counter({
+  name: 'serp_cost_usd_total',
+  help: 'Total estimated SERP API cost in USD',
+  labelNames: ['workspace_id', 'project_id'],
+});
+
 // Start metrics server
 export function startMetricsServer() {
   const port = process.env.WORKER_METRICS_PORT || process.env.METRICS_PORT || '8084';

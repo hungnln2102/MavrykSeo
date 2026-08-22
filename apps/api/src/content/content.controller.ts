@@ -2,13 +2,14 @@ import { Controller, Post, Get, Patch, Body, Param, UseGuards } from '@nestjs/co
 import { ContentService } from './content.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
+import { ProjectGuard } from '../tenancy/project.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('projects/:projectId')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, ProjectGuard)
 export class ContentController {
   constructor(private readonly contentService: ContentService) {}
 

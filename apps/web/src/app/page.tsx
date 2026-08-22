@@ -28,6 +28,48 @@ import {
   FileText
 } from 'lucide-react';
 
+function renderProvenanceBadge(type: 'observed' | 'derived' | 'estimated' | 'ai') {
+  let text = '';
+  let bg = '';
+  let color = '';
+  if (type === 'observed') {
+    text = 'Observed';
+    bg = 'rgba(59, 130, 246, 0.1)';
+    color = 'rgb(147, 197, 253)';
+  } else if (type === 'derived') {
+    text = 'Derived';
+    bg = 'rgba(245, 158, 11, 0.1)';
+    color = 'rgb(253, 186, 116)';
+  } else if (type === 'estimated') {
+    text = 'Estimated';
+    bg = 'rgba(16, 185, 129, 0.1)';
+    color = 'rgb(167, 243, 208)';
+  } else if (type === 'ai') {
+    text = 'AI-Generated';
+    bg = 'rgba(139, 92, 246, 0.1)';
+    color = 'rgb(196, 181, 253)';
+  }
+
+  return (
+    <span style={{
+      fontSize: '0.65rem',
+      fontWeight: 650,
+      padding: '0.1rem 0.35rem',
+      borderRadius: '3px',
+      marginLeft: '0.35rem',
+      background: bg,
+      color: color,
+      border: `1px solid ${color.replace('rgb', 'rgba').replace(')', ', 0.25)')}`,
+      textTransform: 'uppercase',
+      letterSpacing: '0.025em',
+      verticalAlign: 'middle',
+      display: 'inline-block'
+    }}>
+      {text}
+    </span>
+  );
+}
+
 export default function Page() {
   const [selectedSite, setSelectedSite] = useState('mavryk.io');
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -152,6 +194,31 @@ export default function Page() {
   const [recs, setRecs] = useState<any[]>([]);
   const [apiLoading, setApiLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  // Ingestion Inbound History & Audit logs states
+  const [crawlsHistory, setCrawlsHistory] = useState<any[]>([]);
+  const [loadingCrawlsHistory, setLoadingCrawlsHistory] = useState<boolean>(false);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState<boolean>(false);
+  const [viewingRawHtmlJobRunId, setViewingRawHtmlJobRunId] = useState<string | null>(null);
+  const [rawHtmlContent, setRawHtmlContent] = useState<string>('');
+  const [loadingRawHtml, setLoadingRawHtml] = useState<boolean>(false);
+
+  // SEO Standards & Audits States
+  const [standardsVersions, setStandardsVersions] = useState<any[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<string>('');
+  const [standardsControls, setStandardsControls] = useState<any[]>([]);
+  const [loadingStandards, setLoadingStandards] = useState<boolean>(false);
+  const [activeStandardsTab, setActiveStandardsTab] = useState<'browser' | 'audit_runs'>('browser');
+  const [auditRunsList, setAuditRunsList] = useState<any[]>([]);
+  const [selectedAuditRunId, setSelectedAuditRunId] = useState<string>('');
+  const [auditResultsList, setAuditResultsList] = useState<any[]>([]);
+  const [loadingResults, setLoadingResults] = useState<boolean>(false);
+  const [triggeringAudit, setTriggeringAudit] = useState<boolean>(false);
+  const [editingResultId, setEditingResultId] = useState<string | null>(null);
+  const [editResultStatus, setEditResultStatus] = useState<string>('PASS');
+  const [editExceptionReason, setEditExceptionReason] = useState<string>('');
+  const [submittingVerification, setSubmittingVerification] = useState<boolean>(false);
 
   React.useEffect(() => {
     async function initApi() {
@@ -355,6 +422,116 @@ export default function Page() {
       console.error('Error fetching keywords:', err);
     }
   }, [token, workspaceId, projectId]);
+
+  const fetchCrawlsHistory = React.useCallback(async () => {
+    if (!token || !workspaceId || !activeSite) return;
+    try {
+      setLoadingCrawlsHistory(true);
+      const res = await fetch(`http://localhost:3000/sites/${activeSite.id}/crawls`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setCrawlsHistory(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching crawls history:', err);
+    } finally {
+      setLoadingCrawlsHistory(false);
+    }
+  }, [token, workspaceId, activeSite]);
+
+  const fetchAuditLogs = React.useCallback(async () => {
+    if (!token || !workspaceId) return;
+    try {
+      setLoadingAuditLogs(true);
+      const res = await fetch(`http://localhost:3000/workspaces/active/audit-logs`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setAuditLogs(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    } finally {
+      setLoadingAuditLogs(false);
+    }
+  }, [token, workspaceId]);
+
+  async function handleReplayJob(jobRunId: string) {
+    if (!token || !workspaceId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/jobs/${jobRunId}/replay`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        alert('Đã gửi yêu cầu chạy lại Job thành công!');
+        fetchCrawlsHistory();
+      } else {
+        const errorData = await res.json();
+        alert(`Không thể chạy lại Job: ${errorData.message || 'Lỗi hệ thống'}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi chạy lại Job: ${err.message}`);
+    }
+  }
+
+  async function handleReprocessJob(jobRunId: string) {
+    if (!token || !workspaceId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/jobs/${jobRunId}/reprocess`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        alert('Đã gửi yêu cầu reprocessing (xử lý lại từ S3) thành công!');
+        fetchCrawlsHistory();
+      } else {
+        const errorData = await res.json();
+        alert(`Không thể reprocessing: ${errorData.message || 'Lỗi hệ thống'}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi reprocessing: ${err.message}`);
+    }
+  }
+
+  async function handleViewRawHtml(jobRunId: string) {
+    if (!token || !workspaceId || !activeSite) return;
+    setViewingRawHtmlJobRunId(jobRunId);
+    setRawHtmlContent('');
+    setLoadingRawHtml(true);
+    try {
+      const res = await fetch(`http://localhost:3000/sites/${activeSite.id}/crawls/${jobRunId}/raw`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        const html = await res.text();
+        setRawHtmlContent(html);
+      } else {
+        const errorVal = await res.json();
+        setRawHtmlContent(`Lỗi: ${errorVal.message || 'Không thể tải HTML thô'}`);
+      }
+    } catch (err: any) {
+      setRawHtmlContent(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      setLoadingRawHtml(false);
+    }
+  }
 
   async function handleTriggerCrawl() {
     if (!token || !workspaceId || !activeSite) return;
@@ -570,6 +747,164 @@ export default function Page() {
     }
   }
 
+  const fetchStandardsVersions = React.useCallback(async () => {
+    if (!token || !workspaceId) return;
+    try {
+      setLoadingStandards(true);
+      const res = await fetch(`http://localhost:3000/standards/versions`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStandardsVersions(data);
+        if (data.length > 0 && !selectedVersionId) {
+          setSelectedVersionId(data[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching standard versions:', err);
+    } finally {
+      setLoadingStandards(false);
+    }
+  }, [token, workspaceId, selectedVersionId]);
+
+  const fetchStandardsControls = React.useCallback(async (versionId: string) => {
+    if (!token || !workspaceId || !versionId) return;
+    try {
+      setLoadingStandards(true);
+      const res = await fetch(`http://localhost:3000/standards/versions/${versionId}/controls`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setStandardsControls(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching standard controls:', err);
+    } finally {
+      setLoadingStandards(false);
+    }
+  }, [token, workspaceId]);
+
+  const fetchAuditRuns = React.useCallback(async () => {
+    if (!token || !workspaceId || !projectId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/audit-runs`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setAuditRunsList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching audit runs:', err);
+    }
+  }, [token, workspaceId, projectId]);
+
+  const fetchAuditResults = React.useCallback(async (runId: string) => {
+    if (!token || !workspaceId || !runId) return;
+    try {
+      setLoadingResults(true);
+      const res = await fetch(`http://localhost:3000/audit-runs/${runId}/results`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+      if (res.ok) {
+        setAuditResultsList(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching audit results:', err);
+    } finally {
+      setLoadingResults(false);
+    }
+  }, [token, workspaceId]);
+
+  async function handleTriggerAuditRun() {
+    if (!token || !workspaceId || !projectId || !selectedVersionId) {
+      alert('Vui lòng chọn phiên bản tiêu chuẩn để bắt đầu đánh giá.');
+      return;
+    }
+
+    try {
+      setTriggeringAudit(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/audit-runs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          standardVersionId: selectedVersionId,
+          scopeSnapshot: {
+            domain: selectedSite ?? 'unknown',
+            triggeredAt: new Date().toISOString(),
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const newRun = await res.json();
+        alert('Khởi chạy đánh giá tiêu chuẩn SEO thành công!');
+        fetchAuditRuns();
+        setSelectedAuditRunId(newRun.id);
+        fetchAuditResults(newRun.id);
+        setActiveStandardsTab('audit_runs');
+      } else {
+        const err = await res.json();
+        alert(`Lỗi khởi chạy đánh giá: ${err.message || 'Không rõ nguyên nhân'}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      setTriggeringAudit(false);
+    }
+  }
+
+  async function handleVerifyControlResult(resultId: string) {
+    if (!token || !workspaceId) return;
+    try {
+      setSubmittingVerification(true);
+      const res = await fetch(`http://localhost:3000/control-results/${resultId}/manual-verification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({
+          result: editResultStatus,
+          exceptionReason: editExceptionReason.trim() || undefined,
+        }),
+      });
+
+      if (res.ok) {
+        alert('Xác thực thủ công và ghi chú sự vụ thành công!');
+        setEditingResultId(null);
+        setEditExceptionReason('');
+        if (selectedAuditRunId) {
+          fetchAuditResults(selectedAuditRunId);
+        }
+      } else {
+        const err = await res.json();
+        alert(`Không thể xác thực: ${err.message || 'Lỗi hệ thống'}`);
+      }
+    } catch (err: any) {
+      alert(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      setSubmittingVerification(false);
+    }
+  }
+
   async function handleSaveRecDetail() {
     if (!token || !workspaceId || !selectedRecForDetail) return;
     try {
@@ -624,7 +959,33 @@ export default function Page() {
     }
   }
 
-  async function fetchBriefForPlan(planId: string) {
+  const runOptimization = React.useCallback(async (planId: string, bodyText: string) => {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      setIsOptimizing(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/${planId}/optimize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+        body: JSON.stringify({ bodyText }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setOptimizationResult(data);
+      }
+    } catch (err) {
+      console.error('Error running optimization:', err);
+    } finally {
+      setIsOptimizing(false);
+    }
+  }, [token, workspaceId, projectId]);
+
+  const fetchBriefForPlan = React.useCallback(async (planId: string) => {
     if (!token || !workspaceId || !projectId) return;
     setBrief(null);
     setOptimizationResult(null);
@@ -649,7 +1010,7 @@ export default function Page() {
     } catch (err) {
       console.error('Error fetching brief:', err);
     }
-  }
+  }, [token, workspaceId, projectId, contentPlansList, runOptimization]);
 
   async function handleCreateTopic() {
     if (!newTopicName || !token || !workspaceId || !projectId) {
@@ -754,32 +1115,6 @@ export default function Page() {
       setIsGeneratingBrief(false);
     }
   }
-
-  const runOptimization = React.useCallback(async (planId: string, bodyText: string) => {
-    if (!token || !workspaceId || !projectId) return;
-
-    try {
-      setIsOptimizing(true);
-      const res = await fetch(`http://localhost:3000/projects/${projectId}/content-plans/${planId}/optimize`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'x-workspace-id': workspaceId,
-        },
-        body: JSON.stringify({ bodyText }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setOptimizationResult(data);
-      }
-    } catch (err) {
-      console.error('Error running optimization:', err);
-    } finally {
-      setIsOptimizing(false);
-    }
-  }, [token, workspaceId, projectId]);
 
   async function handleImportUrl() {
     if (!importUrlStr.trim() || !importKeyword.trim() || !token || !workspaceId || !projectId) {
@@ -913,7 +1248,31 @@ export default function Page() {
     fetchMembers();
     fetchReports();
     fetchDecayedPlans();
-  }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans]);
+    fetchStandardsVersions();
+    fetchAuditRuns();
+  }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans, fetchStandardsVersions, fetchAuditRuns]);
+
+  // Fetch controls when active version changes
+  React.useEffect(() => {
+    if (selectedVersionId) {
+      fetchStandardsControls(selectedVersionId);
+    }
+  }, [selectedVersionId, fetchStandardsControls]);
+
+  // Fetch audit results when active audit run changes
+  React.useEffect(() => {
+    if (selectedAuditRunId) {
+      fetchAuditResults(selectedAuditRunId);
+    }
+  }, [selectedAuditRunId, fetchAuditResults]);
+
+  // Fetch Crawls History and system Audit Logs when tab is active or activeSite changes
+  React.useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchCrawlsHistory();
+      fetchAuditLogs();
+    }
+  }, [activeTab, fetchCrawlsHistory, fetchAuditLogs]);
 
   // Debounced Real-time Content Optimization
   React.useEffect(() => {
@@ -1173,10 +1532,10 @@ export default function Page() {
   const sites = ['mavryk.io', 'seo-platform.dev', 'e-commerce-shop.com'];
 
   const metrics = [
-    { label: 'Total Clicks', value: '42.8K', change: '+14.2%', positive: true, icon: Activity },
-    { label: 'Avg. CTR', value: '3.4%', change: '+0.8%', positive: true, icon: TrendingUp },
-    { label: 'Avg. Position', value: '11.2', change: '-2.4', positive: true, icon: Sparkles },
-    { label: 'Crawl Health', value: '98%', change: '0%', positive: true, icon: CheckCircle2 }
+    { label: 'Total Clicks', value: '42.8K', change: '+14.2%', positive: true, icon: Activity, provenance: 'observed' },
+    { label: 'Avg. CTR', value: '3.4%', change: '+0.8%', positive: true, icon: TrendingUp, provenance: 'derived' },
+    { label: 'Avg. Position', value: '11.2', change: '-2.4', positive: true, icon: Sparkles, provenance: 'observed' },
+    { label: 'Crawl Health', value: '98%', change: '0%', positive: true, icon: CheckCircle2, provenance: 'derived' }
   ];
 
   const keywords = [
@@ -1294,6 +1653,13 @@ export default function Page() {
             <span>Audit Site</span>
           </button>
           <button
+            onClick={() => setActiveTab('standards')}
+            style={{ ...styles.navItem, ...(activeTab === 'standards' ? styles.navItemActive : {}) }}
+          >
+            <BookOpen size={18} />
+            <span>SEO Standards</span>
+          </button>
+          <button
             onClick={() => setActiveTab('backlinks')}
             style={{ ...styles.navItem, ...(activeTab === 'backlinks' ? styles.navItemActive : {}) }}
           >
@@ -1341,6 +1707,7 @@ export default function Page() {
               {activeTab === 'content' && 'Content Marketing'}
               {activeTab === 'keywords' && 'Rank Tracker'}
               {activeTab === 'audit' && 'Audit Site'}
+              {activeTab === 'standards' && 'Tiêu chuẩn & Đánh giá SEO'}
               {activeTab === 'backlinks' && 'Backlinks'}
               {activeTab === 'reports' && 'Báo cáo White-label'}
               {activeTab === 'settings' && 'Settings'}
@@ -1348,7 +1715,8 @@ export default function Page() {
             <p style={styles.headerSubtitle}>
               {activeTab === 'dashboard' && 'Real-time Google Search Console & Audit Insights for '}
               {activeTab === 'content' && 'Plan, outline, and optimize your content authority for '}
-              {activeTab !== 'dashboard' && activeTab !== 'content' && 'Manage your '}
+              {activeTab === 'standards' && 'Quản lý chuẩn SEO và kiểm tra checklist nội bộ cho '}
+              {activeTab !== 'dashboard' && activeTab !== 'content' && activeTab !== 'standards' && 'Manage your '}
               <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{selectedSite}</span>
             </p>
           </div>
@@ -1374,7 +1742,10 @@ export default function Page() {
                 return (
                   <div key={idx} className="glass-card" style={styles.metricCard}>
                     <div style={styles.metricHeader}>
-                      <span style={styles.metricLabel}>{m.label}</span>
+                      <span style={styles.metricLabel}>
+                        {m.label}
+                        {m.provenance && renderProvenanceBadge(m.provenance as any)}
+                      </span>
                       <div style={styles.metricIconWrap}>
                         <Icon size={16} color="var(--accent-primary)" />
                       </div>
@@ -1400,7 +1771,7 @@ export default function Page() {
             <div className="glass-card" style={styles.chartCard}>
               <div className={'dashboard-chart-header'} style={styles.chartHeader}>
                 <div>
-                  <h2 style={styles.cardTitle}>Performance Overview</h2>
+                  <h2 style={styles.cardTitle}>Performance Overview {renderProvenanceBadge('observed')}</h2>
                   <p style={styles.cardSubtitle}>Organic traffic trends and daily impressions</p>
                 </div>
                 <div style={styles.chartPeriod}>
@@ -1601,21 +1972,21 @@ export default function Page() {
                 style={{ ...styles.subTabButton, ...(contentSubTab === 'topics' ? styles.subTabButtonActive : {}) }}
               >
                 <BookOpen size={16} />
-                <span>Topical Authority Map</span>
+                <span>Topical Authority Map {renderProvenanceBadge('derived')}</span>
               </button>
               <button
                 onClick={() => setContentSubTab('research')}
                 style={{ ...styles.subTabButton, ...(contentSubTab === 'research' ? styles.subTabButtonActive : {}) }}
               >
                 <Search size={16} />
-                <span>Keyword Research</span>
+                <span>Keyword Research {renderProvenanceBadge('estimated')}</span>
               </button>
               <button
                 onClick={() => setContentSubTab('editor')}
                 style={{ ...styles.subTabButton, ...(contentSubTab === 'editor' ? styles.subTabButtonActive : {}) }}
               >
                 <Sparkles size={16} />
-                <span>AI SEO Writer</span>
+                <span>AI SEO Writer {renderProvenanceBadge('ai')}</span>
               </button>
             </div>
 
@@ -1810,7 +2181,7 @@ export default function Page() {
                 {/* Topic Map List */}
                 <div style={{ flex: 2 }}>
                   <div className="glass-card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ ...styles.cardTitle, marginBottom: '1.25rem' }}>Topical Authority Structure</h3>
+                    <h3 style={{ ...styles.cardTitle, marginBottom: '1.25rem' }}>Topical Authority Structure {renderProvenanceBadge('derived')}</h3>
                     {topicsList.length === 0 ? (
                       <div style={styles.emptyState}>
                         <p>No topical hubs established yet. Create parent topics on the right to build visual clusters!</p>
@@ -2582,7 +2953,7 @@ export default function Page() {
                       {/* Left: AI SEO Brief */}
                       <div style={styles.editorColBrief}>
                         <div className="glass-card" style={{ padding: '1.25rem', height: '100%', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                          <h3 style={styles.cardTitle}>AI Content Brief</h3>
+                          <h3 style={styles.cardTitle}>AI Content Brief {renderProvenanceBadge('ai')}</h3>
                           
                           {!brief ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '2rem 1rem', textAlign: 'center' }}>
@@ -2610,15 +2981,15 @@ export default function Page() {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto', flex: 1 }}>
                               {/* Word Count Indicator */}
                               <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Suggested Word Count</span>
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Suggested Word Count {renderProvenanceBadge('estimated')}</span>
                                 <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--accent-secondary)', marginTop: '0.1rem' }}>
-                                  {brief.targetWordCount}+ words
+                                    {brief.targetWordCount}+ words
                                 </div>
                               </div>
 
                               {/* Target Headings */}
                               <div>
-                                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>AI Outline Structure</h4>
+                                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>AI Outline Structure {renderProvenanceBadge('ai')}</h4>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                   {brief.outline?.map((item: any, idx: number) => {
                                     let isH2 = false;
@@ -2875,7 +3246,7 @@ export default function Page() {
             <div style={styles.metricsGrid}>
               <div className="glass-card" style={styles.metricCard}>
                 <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Điểm Sức Khỏe (Health Score)</span>
+                  <span style={styles.metricLabel}>Điểm Sức Khỏe (Health Score) {renderProvenanceBadge('derived')}</span>
                   <div style={styles.metricIconWrap}>
                     <Activity size={16} color="var(--accent-green)" />
                   </div>
@@ -2892,7 +3263,7 @@ export default function Page() {
 
               <div className="glass-card" style={styles.metricCard}>
                 <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Đã Quét (Pages Crawled)</span>
+                  <span style={styles.metricLabel}>Đã Quét (Pages Crawled) {renderProvenanceBadge('observed')}</span>
                   <div style={styles.metricIconWrap}>
                     <Globe size={16} color="var(--accent-primary)" />
                   </div>
@@ -2907,7 +3278,7 @@ export default function Page() {
 
               <div className="glass-card" style={styles.metricCard}>
                 <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Số Lỗi Phát Hiện (Issues)</span>
+                  <span style={styles.metricLabel}>Số Lỗi Phát Hiện (Issues) {renderProvenanceBadge('derived')}</span>
                   <div style={styles.metricIconWrap}>
                     <AlertCircle size={16} color="var(--accent-orange)" />
                   </div>
@@ -2926,7 +3297,7 @@ export default function Page() {
             {/* Audit Issues Details */}
             <div className="glass-card" style={{ padding: '1.5rem' }}>
               <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
-                <h3 style={styles.cardTitle}>Danh sách Lỗi Technical SEO & Kiến nghị</h3>
+                <h3 style={styles.cardTitle}>Danh sách Lỗi Technical SEO & Kiến nghị {renderProvenanceBadge('derived')}</h3>
                 <p style={styles.cardSubtitle}>Được sắp xếp theo độ ưu tiên và ảnh hưởng tới SEO</p>
               </div>
 
@@ -3009,6 +3380,747 @@ export default function Page() {
                 </div>
               )}
             </div>
+
+            {/* History and Audit Records Section */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1.5rem', width: '100%' }}>
+              
+              {/* Crawl Job History Block */}
+              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
+                  <h3 style={styles.cardTitle}>Lịch sử Thu thập (Crawl Job Runs)</h3>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                    <p style={{ ...styles.cardSubtitle, margin: 0 }}>Theo dõi quá trình chạy và lỗi của Crawler</p>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      color: 'var(--accent-green)',
+                      fontSize: '0.7rem',
+                      fontWeight: 650,
+                      padding: '0.15rem 0.45rem',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(16, 185, 129, 0.2)'
+                    }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-green)', marginRight: '4px', display: 'inline-blocks' } as any}></span>
+                      SLO: OK (&lt;24h)
+                    </span>
+                  </div>
+                </div>
+
+                {loadingCrawlsHistory ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+                    <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                  </div>
+                ) : crawlsHistory.length === 0 ? (
+                  <div style={styles.emptyState}>
+                    <p style={{ color: 'var(--text-muted)' }}>Không có lịch sử chạy crawl nào cho site này.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left' }}>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Mã Job / Thời gian</th>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Trạng thái</th>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)', textAlign: 'right' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {crawlsHistory.map((run) => (
+                          <tr key={run.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', color: 'var(--text-primary)' }}>
+                            <td style={{ padding: '0.75rem 0.5rem' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>{run.id.substring(0, 8)}...</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {new Date(run.createdAt).toLocaleString('vi-VN')}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.75rem 0.5rem' }}>
+                              <span style={{
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                display: 'inline-block',
+                                background: run.state === 'completed' ? 'rgba(34, 197, 94, 0.1)' : run.state === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(234, 179, 8, 0.1)',
+                                color: run.state === 'completed' ? 'var(--accent-green)' : run.state === 'failed' ? 'var(--accent-red)' : 'var(--accent-orange)'
+                              }}>
+                                {run.state}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                {run.state === 'failed' && (
+                                  <button
+                                    onClick={() => handleReplayJob(run.id)}
+                                    style={{
+                                      background: 'var(--accent-primary)',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      padding: '0.3rem 0.6rem',
+                                      color: '#fff',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem'
+                                    }}
+                                  >
+                                    Replay
+                                  </button>
+                                )}
+                                {run.state === 'completed' && (
+                                  <button
+                                    onClick={() => handleViewRawHtml(run.id)}
+                                    style={{
+                                      background: 'rgba(255,255,255,0.06)',
+                                      border: '1px solid rgba(255,255,255,0.1)',
+                                      borderRadius: '4px',
+                                      padding: '0.3rem 0.6rem',
+                                      color: 'var(--text-primary)',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.2rem'
+                                    }}
+                                  >
+                                    <FileText size={12} />
+                                    <span>HTML</span>
+                                  </button>
+                                )}
+                                {(run.state === 'completed' || run.state === 'failed') && (
+                                  <button
+                                    onClick={() => handleReprocessJob(run.id)}
+                                    style={{
+                                      background: 'rgba(99, 102, 241, 0.15)',
+                                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                                      borderRadius: '4px',
+                                      padding: '0.3rem 0.6rem',
+                                      color: 'rgb(165, 180, 252)',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem'
+                                    }}
+                                  >
+                                    Reprocess
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Audit Logs Block */}
+              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
+                  <h3 style={styles.cardTitle}>Nhật ký Hệ thống (Audit Logs)</h3>
+                  <p style={styles.cardSubtitle}>Ghi nhận các chỉnh sửa cấu hình và thao tác</p>
+                </div>
+
+                {loadingAuditLogs ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+                    <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <div style={styles.emptyState}>
+                    <p style={{ color: 'var(--text-muted)' }}>Không có hoạt động hệ thống nào được ghi lại.</p>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left' }}>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Thời gian / User</th>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Thao tác</th>
+                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Đối tượng</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {auditLogs.map((log) => (
+                          <tr key={log.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', color: 'var(--text-primary)' }}>
+                            <td style={{ padding: '0.75rem 0.5rem' }}>
+                              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>
+                                {log.user?.name || log.user?.email || 'Hệ thống'}
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {new Date(log.createdAt).toLocaleString('vi-VN')}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.75rem 0.5rem' }}>
+                              <code style={{ background: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.75rem', color: 'var(--accent-blue)' }}>
+                                {log.action}
+                              </code>
+                            </td>
+                            <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-secondary)' }}>
+                              {log.entityType} ({log.entityId?.substring(0, 8) || 'N/A'})
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SEO Standards & Audit Runs Tab */}
+        {activeTab === 'standards' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+            
+            {/* Top Navigation Options */}
+            <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.5rem' }}>
+              <button
+                onClick={() => setActiveStandardsTab('browser')}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  background: activeStandardsTab === 'browser' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                  border: 'none',
+                  borderBottom: activeStandardsTab === 'browser' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  color: activeStandardsTab === 'browser' ? 'var(--text-bright)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontWeight: 650,
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  borderRadius: '4px 4px 0 0',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <BookOpen size={16} />
+                <span>Trình quản lý Tiêu chuẩn (Standards Browser)</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  setActiveStandardsTab('audit_runs');
+                  if (auditRunsList.length > 0 && !selectedAuditRunId) {
+                    setSelectedAuditRunId(auditRunsList[0].id);
+                  }
+                }}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  background: activeStandardsTab === 'audit_runs' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                  border: 'none',
+                  borderBottom: activeStandardsTab === 'audit_runs' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  color: activeStandardsTab === 'audit_runs' ? 'var(--text-bright)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontWeight: 655,
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  borderRadius: '4px 4px 0 0',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <Activity size={16} />
+                <span>Đánh giá Dự án (Audit Runs)</span>
+              </button>
+            </div>
+
+            {/* View 1: Master standards checklist browser */}
+            {activeStandardsTab === 'browser' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', gap: '1.5rem', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '300px' }}>
+                    <h2 style={styles.cardTitle}>Duyệt Tiêu chuẩn SEO (Mavryk Master SEO Standards)</h2>
+                    <p style={styles.cardSubtitle}>
+                      Tra cứu các phiên cập nhật chuẩn hóa chiến dịch SEO được chứng thực bởi các tổ chức uy tín trên thế giới.
+                    </p>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <label style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>Chọn phiên bản:</label>
+                    <div style={{ ...styles.siteSelectorCard, minWidth: '150px' }}>
+                      <Globe size={16} color="var(--accent-primary)" />
+                      <select
+                        value={selectedVersionId}
+                        onChange={(e) => setSelectedVersionId(e.target.value)}
+                        style={styles.selectInput}
+                      >
+                        {standardsVersions.map((v) => (
+                          <option key={v.id} value={v.id}>Phiên bản {v.version} ({v.status})</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={14} color="var(--text-secondary)" />
+                    </div>
+                  </div>
+                </div>
+
+                {loadingStandards ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
+                    <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                  </div>
+                ) : standardsControls.length === 0 ? (
+                  <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
+                    <AlertCircle size={32} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
+                    <p style={{ color: 'var(--text-muted)', margin: 0 }}>Không tìm thấy control hay module nào của phiên bản tiêu chuẩn này.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    {/* Render controls grouped by modules */}
+                    {Object.entries(
+                      standardsControls.reduce((acc: any, ctrl: any) => {
+                        const modName = ctrl.moduleName || 'Khác';
+                        if (!acc[modName]) acc[modName] = [];
+                        acc[modName].push(ctrl);
+                        return acc;
+                      }, {})
+                    ).map(([moduleName, controls]: [string, any]) => (
+                      <div key={moduleName} className="glass-card" style={{ padding: '1.5rem' }}>
+                        <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
+                          <h3 style={{ ...styles.cardTitle, color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '1.1rem' }}>{moduleName}</span>
+                            <span style={{
+                              background: 'rgba(255,255,255,0.06)',
+                              color: 'var(--text-secondary)',
+                              fontSize: '0.75rem',
+                              padding: '0.1rem 0.4rem',
+                              borderRadius: '3px',
+                              fontWeight: 500
+                            }}>{controls.length} tiêu chí</span>
+                          </h3>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                          {controls.map((ctrl: any) => (
+                            <div
+                              key={ctrl.controlId}
+                              style={{
+                                padding: '1rem',
+                                background: 'rgba(255, 255, 255, 0.02)',
+                                border: '1px solid rgba(255, 255, 255, 0.04)',
+                                borderRadius: '6px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.5rem'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span style={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 700,
+                                    fontSize: '0.85rem',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '4px',
+                                    background: 'rgba(99, 102, 241, 0.2)',
+                                    color: 'var(--accent-primary)'
+                                  }}>{ctrl.controlCode}</span>
+                                  
+                                  <span style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.1rem 0.4rem',
+                                    borderRadius: '4px',
+                                    fontWeight: 650,
+                                    background: ctrl.controlPhase === 'P0' ? 'rgba(239, 68, 68, 0.15)' : ctrl.controlPhase === 'P1' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                                    color: ctrl.controlPhase === 'P0' ? 'var(--accent-red)' : ctrl.controlPhase === 'P1' ? 'var(--accent-orange)' : 'var(--accent-blue)'
+                                  }}>{ctrl.controlPhase} Priority</span>
+                                </div>
+                              </div>
+
+                              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-bright)', lineHeight: '1.4' }}>
+                                {ctrl.controlDescription}
+                              </p>
+
+                              {/* Sources and authorities references */}
+                              {ctrl.sources && ctrl.sources.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Cơ sở tham chiếu:</span>
+                                  {ctrl.sources.map((src: any, idx: number) => (
+                                    <a
+                                      key={idx}
+                                      href={src.url || '#'}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--accent-secondary)',
+                                        textDecoration: 'none',
+                                        background: 'rgba(168, 85, 247, 0.08)',
+                                        padding: '0.15rem 0.4rem',
+                                        borderRadius: '3px',
+                                        border: '1px solid rgba(168, 85, 247, 0.15)',
+                                        transition: 'all 0.2s ease'
+                                      }}
+                                    >
+                                      <span>{src.name}</span>
+                                      <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>[{src.authorityLevel}]</span>
+                                      <ExternalLink size={10} />
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* View 2: Audit Runs management */}
+            {activeStandardsTab === 'audit_runs' && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 320px) minmax(0, 1fr)', gap: '1.5rem', alignItems: 'flex-start' }}>
+                
+                {/* Left panel: Runs History & Trigger Action */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  <div className="glass-card" style={{ padding: '1.25rem' }}>
+                    <h3 style={{ ...styles.cardTitle, marginBottom: '0.75rem' }}>Đánh giá Dự án</h3>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
+                      <div>
+                        <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem' }}>Phiên bản chuẩn đối sánh:</label>
+                        <select
+                          value={selectedVersionId}
+                          onChange={(e) => setSelectedVersionId(e.target.value)}
+                          style={{ ...styles.formInput, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                        >
+                          {standardsVersions.map((v) => (
+                            <option key={v.id} value={v.id}>Phiên bản {v.version}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={handleTriggerAuditRun}
+                        disabled={triggeringAudit || !selectedVersionId}
+                        style={{
+                          width: '100%',
+                          padding: '0.5rem 1rem',
+                          background: 'var(--accent-primary)',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          fontWeight: 600,
+                          cursor: (triggeringAudit || !selectedVersionId) ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
+                          fontSize: '0.85rem',
+                          opacity: (triggeringAudit || !selectedVersionId) ? 0.7 : 1,
+                        }}
+                      >
+                        {triggeringAudit ? (
+                          <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                        ) : (
+                          <Search size={14} />
+                        )}
+                        <span>{triggeringAudit ? 'Đang khởi chạy...' : 'Khởi chạy Đánh giá mới'}</span>
+                      </button>
+                    </div>
+
+                    <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                      <h4 style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', fontWeight: 655 }}>Lịch sử Đánh giá</h4>
+                      
+                      {auditRunsList.length === 0 ? (
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center', margin: '1rem 0' }}>Chưa có lượt chạy kiểm toán tiêu chuẩn nào.</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '350px', overflowY: 'auto' }}>
+                          {auditRunsList.map((run) => (
+                            <button
+                              key={run.id}
+                              onClick={() => {
+                                setSelectedAuditRunId(run.id);
+                                fetchAuditResults(run.id);
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: selectedAuditRunId === run.id ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
+                                border: selectedAuditRunId === run.id ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.04)',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.2rem',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                                <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 655, color: selectedAuditRunId === run.id ? 'var(--text-bright)' : 'var(--text-secondary)' }}>
+                                  RUN-{run.id.substring(0, 6).toUpperCase()}
+                                </span>
+                                <span style={{
+                                  fontSize: '0.7rem',
+                                  padding: '0.1rem 0.3rem',
+                                  borderRadius: '3px',
+                                  background: run.status === 'active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255,255,255,0.1)',
+                                  color: run.status === 'active' ? 'var(--accent-green)' : 'var(--text-secondary)'
+                                }}>{run.status}</span>
+                              </div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {new Date(run.createdAt).toLocaleString('vi-VN')}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right panel: Results detail list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1 }}>
+                  {!selectedAuditRunId ? (
+                    <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
+                      <Activity size={32} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
+                      <p style={{ color: 'var(--text-muted)' }}>Vui lòng chọn hoặc khởi chạy một lượt đánh giá tiêu chuẩn bên cột trái để xem chi tiết.</p>
+                    </div>
+                  ) : loadingResults ? (
+                    <div className="glass-card" style={{ padding: '4rem', textAlign: 'center' }}>
+                      <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)', marginBottom: '0.5rem' }} />
+                      <p style={{ color: 'var(--text-muted)' }}>Đang tải danh sách kết quả checklist...</p>
+                    </div>
+                  ) : auditResultsList.length === 0 ? (
+                    <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
+                      <AlertCircle size={32} color="var(--accent-orange)" style={{ marginBottom: '1rem' }} />
+                      <p style={{ color: 'var(--text-muted)' }}>Đang tạo hoặc không tìm thấy dữ liệu kết quả kiểm toán.</p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      
+                      {/* Summary dashboard of selected run results */}
+                      <div className="glass-card" style={{ padding: '1.25rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mã Chạy Kiểm Toán</h4>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-bright)', fontFamily: 'monospace' }}>RUN-{selectedAuditRunId.toUpperCase()}</div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Phiên bản: <strong style={{ color: 'var(--accent-primary)' }}>{auditResultsList[0]?.versionCode || 'Master v1.0'}</strong>
+                          </span>
+                        </div>
+
+                        {/* Quick counts */}
+                        <div style={{ display: 'flex', gap: '1rem' }}>
+                          {[
+                            { label: 'Cần Duyệt', value: auditResultsList.filter(r => r.result === 'NEED_DATA').length, color: 'var(--text-muted)', bg: 'rgba(255,255,255,0.06)' },
+                            { label: 'Đạt (PASS)', value: auditResultsList.filter(r => r.result === 'PASS').length, color: 'var(--accent-green)', bg: 'rgba(16, 185, 129, 0.1)' },
+                            { label: 'Cảnh Báo', value: auditResultsList.filter(r => r.result === 'WARNING').length, color: 'var(--accent-orange)', bg: 'rgba(245, 158, 11, 0.1)' },
+                            { label: 'Không Đạt (FAIL)', value: auditResultsList.filter(r => r.result === 'FAIL').length, color: 'var(--accent-red)', bg: 'rgba(239, 68, 68, 0.1)' },
+                          ].map((stat, idx) => (
+                            <div key={idx} style={{ padding: '0.5rem 0.75rem', background: stat.bg, borderRadius: '4px', textAlign: 'center', minWidth: '80px', border: `1px solid ${stat.color}20` }}>
+                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: stat.color }}>{stat.value}</div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{stat.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Group and render results by modules */}
+                      {Object.entries(
+                        auditResultsList.reduce((acc: any, res: any) => {
+                          const modName = res.moduleName || 'Khác';
+                          if (!acc[modName]) acc[modName] = [];
+                          acc[modName].push(res);
+                          return acc;
+                        }, {})
+                      ).map(([moduleName, results]: [string, any]) => (
+                        <div key={moduleName} className="glass-card" style={{ padding: '1.25rem' }}>
+                          <h4 style={{ ...styles.cardTitle, color: 'var(--accent-primary)', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '0.95rem' }}>
+                            {moduleName}
+                          </h4>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            {results.map((res: any) => {
+                              const isEditing = editingResultId === res.resultId;
+                              
+                              // Badge styling mapping
+                              let badgeColor = 'var(--text-muted)';
+                              let badgeBg = 'rgba(255, 255, 255, 0.06)';
+                              if (res.result === 'PASS') {
+                                badgeColor = 'var(--accent-green)';
+                                badgeBg = 'rgba(16, 185, 129, 0.15)';
+                              } else if (res.result === 'FAIL') {
+                                badgeColor = 'var(--accent-red)';
+                                badgeBg = 'rgba(239, 68, 68, 0.15)';
+                              } else if (res.result === 'WARNING') {
+                                badgeColor = 'var(--accent-orange)';
+                                badgeBg = 'rgba(245, 158, 11, 0.15)';
+                              } else if (res.result === 'ACCEPTED_RISK') {
+                                badgeColor = 'var(--accent-blue)';
+                                badgeBg = 'rgba(59, 130, 246, 0.15)';
+                              }
+
+                              return (
+                                <div
+                                  key={res.resultId}
+                                  style={{
+                                    padding: '0.85rem',
+                                    background: 'rgba(255,255,255,0.01)',
+                                    border: '1px solid rgba(255,255,255,0.04)',
+                                    borderRadius: '5px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.5rem'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-bright)' }}>{res.controlCode}</span>
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>| {res.controlPhase}</span>
+                                    </div>
+                                    
+                                    <span style={{
+                                      fontSize: '0.7rem',
+                                      fontWeight: 650,
+                                      padding: '0.15rem 0.45rem',
+                                      borderRadius: '4px',
+                                      color: badgeColor,
+                                      background: badgeBg,
+                                      border: `1px solid ${badgeColor}30`,
+                                      textTransform: 'uppercase'
+                                    }}>{res.result}</span>
+                                  </div>
+
+                                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                                    {res.controlDescription}
+                                  </p>
+
+                                  {/* Exception information if any */}
+                                  {res.exceptionReason && (
+                                    <div style={{
+                                      marginTop: '0.25rem',
+                                      padding: '0.5rem',
+                                      borderRadius: '4px',
+                                      background: 'rgba(168, 85, 247, 0.06)',
+                                      borderLeft: '3px solid var(--accent-secondary)',
+                                      fontSize: '0.75rem',
+                                      color: 'var(--text-muted)'
+                                    }}>
+                                      <strong>Ghi chú / Ngoại lệ:</strong> {res.exceptionReason}
+                                      {res.reviewerEmail && ` (Xác minh bởi: ${res.reviewerEmail})`}
+                                    </div>
+                                  )}
+
+                                  {/* Manual review controls */}
+                                  {editingResultId !== res.resultId ? (
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
+                                      <button
+                                        onClick={() => {
+                                          setEditingResultId(res.resultId);
+                                          setEditResultStatus(res.result === 'NEED_DATA' ? 'PASS' : res.result);
+                                          setEditExceptionReason(res.exceptionReason || '');
+                                        }}
+                                        style={{
+                                          background: 'transparent',
+                                          border: 'none',
+                                          color: 'var(--accent-secondary)',
+                                          fontSize: '0.75rem',
+                                          cursor: 'pointer',
+                                          fontWeight: 650,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.2rem',
+                                          opacity: 0.8,
+                                          padding: '0.1rem 0.2rem'
+                                        }}
+                                      >
+                                        <Settings size={12} />
+                                        <span>Cập nhật kết quả / Ghi chú ngoại lệ</span>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div style={{
+                                      marginTop: '0.75rem',
+                                      padding: '0.75rem',
+                                      background: 'rgba(255, 255, 255, 0.02)',
+                                      border: '1px dashed rgba(255, 255, 255, 0.1)',
+                                      borderRadius: '4px',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '0.65rem'
+                                    }}>
+                                      <h5 style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-bright)' }}>Xác thực thủ công tiêu chí {res.controlCode}</h5>
+                                      
+                                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Kết quả đánh giá:</label>
+                                        <div style={{ ...styles.siteSelectorCard, minWidth: '130px', padding: '0.25rem 0.5rem' }}>
+                                          <select
+                                            value={editResultStatus}
+                                            onChange={(e) => setEditResultStatus(e.target.value)}
+                                            style={{ ...styles.selectInput, fontSize: '0.75rem' }}
+                                          >
+                                            <option value="PASS">PASS (Đạt)</option>
+                                            <option value="FAIL">FAIL (Không đạt)</option>
+                                            <option value="WARNING">WARNING (Cảnh báo)</option>
+                                            <option value="ACCEPTED_RISK">ACCEPTED RISK (Chấp nhận rủi ro)</option>
+                                          </select>
+                                          <ChevronDown size={12} color="var(--text-secondary)" />
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <label style={{ ...styles.formLabel, display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
+                                          Mô tả chi tiết / Lý do chấp nhận ngoại lệ
+                                        </label>
+                                        <textarea
+                                          value={editExceptionReason}
+                                          onChange={(e) => setEditExceptionReason(e.target.value)}
+                                          placeholder="Nêu rõ lý do hoặc kết quả đo kiểm, liên kết hồ sơ chi tiết đối sánh nếu có..."
+                                          style={{ ...styles.formInput, height: '60px', padding: '0.4rem', fontSize: '0.8rem' }}
+                                        />
+                                      </div>
+
+                                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                        <button
+                                          onClick={() => setEditingResultId(null)}
+                                          disabled={submittingVerification}
+                                          style={{
+                                            padding: '0.3rem 0.6rem',
+                                            background: 'rgba(255, 255, 255, 0.05)',
+                                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                                            borderRadius: '3px',
+                                            color: 'var(--text-secondary)',
+                                            cursor: 'pointer',
+                                            fontSize: '0.75rem'
+                                          }}
+                                        >
+                                          Hủy
+                                        </button>
+                                        
+                                        <button
+                                          onClick={() => handleVerifyControlResult(res.resultId)}
+                                          disabled={submittingVerification}
+                                          style={{
+                                            padding: '0.3rem 0.6rem',
+                                            background: 'var(--accent-primary)',
+                                            border: 'none',
+                                            borderRadius: '3px',
+                                            color: '#fff',
+                                            cursor: submittingVerification ? 'not-allowed' : 'pointer',
+                                            fontSize: '0.75rem',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.2rem'
+                                          }}
+                                        >
+                                          {submittingVerification && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />}
+                                          <span>Lưu thay đổi</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3117,18 +4229,23 @@ export default function Page() {
                               }}>
                                 {hasRank ? `#${rankVal}` : 'Đang quét...'}
                               </span>
+                              {hasRank && renderProvenanceBadge('observed')}
                             </td>
                             <td style={{ ...styles.td, textAlign: 'center' }}>
-                              {kw.volume ? kw.volume.toLocaleString() : 'N/A'}
+                              <span>{kw.volume ? kw.volume.toLocaleString() : 'N/A'}</span>
+                              {!!kw.volume && renderProvenanceBadge('estimated')}
                             </td>
                             <td style={{ ...styles.td, textAlign: 'center' }}>
                               {kw.difficulty ? (
-                                <span style={{
-                                  color: kw.difficulty > 60 ? 'var(--accent-red)' : kw.difficulty > 35 ? 'var(--accent-orange)' : 'var(--accent-green)',
-                                  fontWeight: 500
-                                }}>
-                                  {kw.difficulty}%
-                                </span>
+                                <>
+                                  <span style={{
+                                    color: kw.difficulty > 60 ? 'var(--accent-red)' : kw.difficulty > 35 ? 'var(--accent-orange)' : 'var(--accent-green)',
+                                    fontWeight: 500
+                                  }}>
+                                    {kw.difficulty}%
+                                  </span>
+                                  {renderProvenanceBadge('estimated')}
+                                </>
                               ) : 'N/A'}
                             </td>
                             <td style={{ ...styles.td, textAlign: 'center' }}>
@@ -3839,6 +4956,80 @@ export default function Page() {
                   }}
                 >
                   {isSavingRecDetail ? 'Đang lưu...' : 'Lưu Thay Đổi'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* HTML Viewer Modal */}
+        {viewingRawHtmlJobRunId && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.8)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 99999,
+            padding: '2rem'
+          }}>
+            <div className="glass-card" style={{
+              width: '100%',
+              maxWidth: '900px',
+              height: '80vh',
+              maxHeight: '900px',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: '1.5rem',
+              background: '#0d111a',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Nguồn HTML thô (Raw Web Content)</h3>
+                <button
+                  onClick={() => setViewingRawHtmlJobRunId(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '1.2rem'
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.8rem', color: '#eaeaea', whiteSpace: 'pre-wrap' }}>
+                {loadingRawHtml ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                    <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                  </div>
+                ) : (
+                  rawHtmlContent || 'Không có nội dung HTML'
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button
+                  onClick={() => setViewingRawHtmlJobRunId(null)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Đóng
                 </button>
               </div>
             </div>

@@ -1,20 +1,27 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { db, integrations, projects } from '@seo/db';
-import { eq, and } from 'drizzle-orm';
-import { encryptToken, decryptToken } from '@seo/core';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { db, integrations, projects } from "@seo/db";
+import { eq, and } from "drizzle-orm";
+import { encryptToken, decryptToken } from "@seo/core";
 
 @Injectable()
 export class IntegrationsService {
-  async saveIntegration(workspaceId: string, projectId: string, provider: string, credentials: any) {
+  async saveIntegration(
+    workspaceId: string,
+    projectId: string,
+    provider: string,
+    credentials: any,
+  ) {
     // 1. Verify project belongs to workspace
     const projectResult = await db
       .select()
       .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)))
+      .where(
+        and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)),
+      )
       .limit(1);
 
     if (projectResult.length === 0) {
-      throw new NotFoundException('Project not found in this workspace');
+      throw new NotFoundException("Project not found in this workspace");
     }
 
     // 2. Encrypt credentials
@@ -25,7 +32,12 @@ export class IntegrationsService {
     const existingResult = await db
       .select()
       .from(integrations)
-      .where(and(eq(integrations.projectId, projectId), eq(integrations.provider, provider)))
+      .where(
+        and(
+          eq(integrations.projectId, projectId),
+          eq(integrations.provider, provider),
+        ),
+      )
       .limit(1);
 
     if (existingResult.length > 0) {
@@ -38,7 +50,11 @@ export class IntegrationsService {
         })
         .where(eq(integrations.id, existingResult[0].id))
         .returning();
-      return { id: updated.id, provider: updated.provider, status: updated.status };
+      return {
+        id: updated.id,
+        provider: updated.provider,
+        status: updated.status,
+      };
     } else {
       // Insert
       const [inserted] = await db
@@ -49,51 +65,109 @@ export class IntegrationsService {
           credentials: encryptedCredentials,
         })
         .returning();
-      return { id: inserted.id, provider: inserted.provider, status: inserted.status };
+      return {
+        id: inserted.id,
+        provider: inserted.provider,
+        status: inserted.status,
+      };
     }
   }
 
-  async getIntegration(workspaceId: string, projectId: string, provider: string) {
-    // 1. Verify project belongs to workspace
-    const projectResult = await db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)))
-      .limit(1);
-
-    if (projectResult.length === 0) {
-      throw new NotFoundException('Project not found in this workspace');
-    }
-
-    // 2. Retrieve integration
-    const result = await db
-      .select()
-      .from(integrations)
-      .where(and(eq(integrations.projectId, projectId), eq(integrations.provider, provider)))
-      .limit(1);
-
-    if (result.length === 0) {
-      throw new NotFoundException(`Integration '${provider}' not found for this project`);
-    }
-
-    const integration = result[0];
-
-    // 3. Decrypt credentials
-    let decryptedCredentials: any;
-    try {
-      const decryptedString = decryptToken(integration.credentials);
-      decryptedCredentials = JSON.parse(decryptedString);
-    } catch (err) {
-      throw new Error(`Failed to decrypt integration credentials: ${err.message}`);
-    }
+  async getIntegration(
+    workspaceId: string,
+    projectId: string,
+    provider: string,
+  ) {
+    const integration = await this.findIntegration(
+      workspaceId,
+      projectId,
+      provider,
+    );
 
     return {
       id: integration.id,
       provider: integration.provider,
       status: integration.status,
-      credentials: decryptedCredentials,
       createdAt: integration.createdAt,
       updatedAt: integration.updatedAt,
     };
+  }
+
+  async getIntegrationCredentials(
+    workspaceId: string,
+    projectId: string,
+    provider: string,
+  ): Promise<unknown> {
+    const integration = await this.findIntegration(
+      workspaceId,
+      projectId,
+      provider,
+    );
+
+    try {
+      return JSON.parse(decryptToken(integration.credentials));
+    } catch {
+      throw new Error("Failed to decrypt integration credentials");
+    }
+  }
+
+  async markIntegrationStatus(
+    workspaceId: string,
+    projectId: string,
+    provider: string,
+    status: string,
+  ) {
+    const integration = await this.findIntegration(
+      workspaceId,
+      projectId,
+      provider,
+    );
+    const [updated] = await db
+      .update(integrations)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(integrations.id, integration.id))
+      .returning();
+    return {
+      id: updated.id,
+      provider: updated.provider,
+      status: updated.status,
+    };
+  }
+
+  private async findIntegration(
+    workspaceId: string,
+    projectId: string,
+    provider: string,
+  ) {
+    const projectResult = await db
+      .select()
+      .from(projects)
+      .where(
+        and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)),
+      )
+      .limit(1);
+
+    if (projectResult.length === 0) {
+      throw new NotFoundException("Project not found in this workspace");
+    }
+
+    const result = await db
+      .select()
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.projectId, projectId),
+          eq(integrations.provider, provider),
+        ),
+      )
+      .limit(1);
+
+    if (result.length === 0) {
+      throw new NotFoundException(
+        `Integration '${provider}' not found for this project`,
+      );
+    }
+
+    return result[0];
   }
 }

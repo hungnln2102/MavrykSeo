@@ -8,6 +8,8 @@ jest.mock('@seo/db', () => ({
   jobRuns: { workspaceId: 'job_runs.workspaceId', idempotencyKey: 'job_runs.idempotencyKey' },
   keywords: { id: 'keywords.id', projectId: 'keywords.projectId', keyword: 'keywords.keyword' },
   projects: { id: 'projects.id', workspaceId: 'projects.workspaceId' },
+  workspaces: { id: 'workspaces.id', plan: 'workspaces.plan' },
+  systemConfigs: { key: 'system_configs.key', value: 'system_configs.value' },
 }));
 
 const mockQueueAdd = jest.fn();
@@ -23,6 +25,8 @@ jest.mock('@seo/clickhouse', () => ({
 jest.mock('drizzle-orm', () => ({
   and: jest.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   eq: jest.fn((column: unknown, value: unknown) => ({ type: 'eq', column, value })),
+  sql: jest.fn((strings: string[], ...values: unknown[]) => ({ type: 'sql', strings, values })),
+  inArray: jest.fn((column: unknown, values: unknown[]) => ({ type: 'inArray', column, values })),
 }));
 
 const mockSelect = db.select as jest.Mock;
@@ -107,6 +111,18 @@ describe('KeywordsService tenant scoping', () => {
       })
       .mockReturnValueOnce({
         from: () => ({ where: () => ({ limit: jest.fn().mockResolvedValue([]) }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: jest.fn().mockResolvedValue([{ plan: 'free' }]) }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: jest.fn().mockResolvedValue([{ value: '10' }]) }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: jest.fn().mockResolvedValue([{ id: 'project-1' }]) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: jest.fn().mockResolvedValue([{ count: 0 }]) }),
       });
     mockInsert
       .mockReturnValueOnce({

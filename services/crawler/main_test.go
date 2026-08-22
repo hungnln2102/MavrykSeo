@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -134,5 +136,59 @@ func TestOutboundCircuitBreakerOpensAndResetsAfterCooldown(t *testing.T) {
 func TestSafeOutboundHostOmitsCredentialsAndPath(t *testing.T) {
 	if got := safeOutboundHost("https://user:password@Example.com/private?token=secret"); got != "example.com" {
 		t.Fatalf("safeOutboundHost returned %q", got)
+	}
+}
+
+func TestSandboxEnvironmentBypass(t *testing.T) {
+	t.Setenv("CRAWLER_ENV", "sandbox")
+
+	// 1. Check isForbiddenIP returns false in sandbox
+	ip := net.ParseIP("127.0.0.1")
+	if isForbiddenIP(ip) {
+		t.Fatal("isForbiddenIP returned true for loopback space in sandbox environment")
+	}
+
+	// 2. Check localhost is allowed in sandbox
+	if _, err := validateOutboundURL("http://localhost/admin"); err != nil {
+		t.Fatalf("localhost is blocked in sandbox environment: %v", err)
+	}
+
+	// 3. Check private IP target is allowed in sandbox
+	if _, err := validateOutboundURL("http://192.168.1.1/internal"); err != nil {
+		t.Fatalf("private IP target is blocked in sandbox environment: %v", err)
+	}
+}
+
+func TestRedirectSSRFBlocksPrivateTarget(t *testing.T) {
+	t.Setenv("CRAWLER_ENV", "production") // Reset to standard production mode
+
+	// Prepare mock request for safeCheckRedirect
+	req, err := http.NewRequest("GET", "http://127.0.0.1/admin", nil)
+	if err != nil {
+		t.Fatalf("failed to create mock request: %v", err)
+	}
+
+	// safeCheckRedirect should fail since 127.0.0.1 is blocked in production
+	err = safeCheckRedirect(req, nil)
+	if err == nil {
+		t.Fatal("safeCheckRedirect allowed redirect to 127.0.0.1 in production")
+	}
+
+	if !strings.Contains(err.Error(), "forbidden") && !strings.Contains(err.Error(), "SSRF") {
+		t.Fatalf("expected SSRF error, got: %v", err)
+	}
+}
+
+func TestSafeDialBlocksLoopbackAndPrivateIPs(t *testing.T) {
+	t.Setenv("CRAWLER_ENV", "production")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := safeDialContext(ctx, "tcp", "localhost:80")
+	if err == nil {
+		t.Fatal("safeDialContext succeeded connecting to localhost in production")
+	}
+	if !strings.Contains(err.Error(), "SSRF protection") {
+		t.Fatalf("expected SSRF error from safeDialContext, got: %v", err)
 	}
 }

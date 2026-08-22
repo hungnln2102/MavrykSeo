@@ -16,9 +16,13 @@ import { AuditLogInterceptor } from './tenancy/audit-log.interceptor';
 import { TerminusModule } from '@nestjs/terminus';
 import { MetricsModule } from './metrics/metrics.module';
 import { JobsModule } from './jobs/jobs.module';
+import { StandardsModule } from './standards/standards.module';
+import { AuditsModule } from './audits/audits.module';
+import { TenancyModule } from './tenancy/tenancy.module';
 
 @Module({
   imports: [
+    TenancyModule,
     AuthModule,
     WorkspacesModule,
     ProjectsModule,
@@ -31,6 +35,8 @@ import { JobsModule } from './jobs/jobs.module';
     TerminusModule,
     MetricsModule,
     JobsModule,
+    StandardsModule,
+    AuditsModule,
     ThrottlerModule.forRoot([
       {
         name: 'short',

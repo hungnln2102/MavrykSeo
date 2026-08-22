@@ -1,6 +1,6 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
-import { db, workspaces, memberships, users } from '@seo/db';
-import { eq, and } from 'drizzle-orm';
+import { db, workspaces, memberships, users, auditLogs } from '@seo/db';
+import { eq, and, desc } from 'drizzle-orm';
 import { UserRole } from '@seo/core';
 
 @Injectable()
@@ -166,5 +166,29 @@ export class WorkspacesService {
       throw new NotFoundException('Workspace not found');
     }
     return workspace[0];
+  }
+
+  async getAuditLogs(workspaceId: string) {
+    const results = await db
+      .select({
+        id: auditLogs.id,
+        action: auditLogs.action,
+        entityType: auditLogs.entityType,
+        entityId: auditLogs.entityId,
+        metadata: auditLogs.metadata,
+        userId: auditLogs.userId,
+        createdAt: auditLogs.createdAt,
+        user: {
+          name: users.name,
+          email: users.email,
+        },
+      })
+      .from(auditLogs)
+      .leftJoin(users, eq(auditLogs.userId, users.id))
+      .where(eq(auditLogs.workspaceId, workspaceId))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(50);
+
+    return results;
   }
 }

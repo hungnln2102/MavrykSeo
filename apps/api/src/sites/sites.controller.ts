@@ -2,13 +2,14 @@ import { Controller, Post, Get, Body, Query, Param, UseGuards, BadRequestExcepti
 import { SitesService } from './sites.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
+import { ProjectGuard } from '../tenancy/project.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('sites')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, ProjectGuard)
 export class SitesController {
   constructor(private readonly sitesService: SitesService) {}
 
@@ -62,5 +63,28 @@ export class SitesController {
       throw new BadRequestException('crawlScheduleMinutes must be null or an integer of at least 60 minutes');
     }
     return this.sitesService.updateCrawlSchedule(workspaceId, siteId, body.crawlScheduleMinutes ?? null);
+  }
+
+  @Get(':siteId/crawls')
+  @AuditLog('site.crawls.read', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async getSiteCrawls(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+  ) {
+    return this.sitesService.getSiteCrawls(workspaceId, siteId);
+  }
+
+  @Get(':siteId/crawls/:jobRunId/raw')
+  @AuditLog('site.crawl_raw.read', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async getCrawlRawHtml(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+    @Param('jobRunId') jobRunId: string,
+  ) {
+    return this.sitesService.getCrawlRawHtml(workspaceId, siteId, jobRunId);
   }
 }

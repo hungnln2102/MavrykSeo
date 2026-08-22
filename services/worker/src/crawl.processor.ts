@@ -1,13 +1,13 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Worker, Job, UnrecoverableError } from 'bullmq';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import * as crypto from 'crypto';
 import { clickhouse } from '@seo/clickhouse';
 import { db, ingestionFences, jobRuns, projects, sites, workspaces } from '@seo/db';
 import { and, eq } from 'drizzle-orm';
 import axios from 'axios';
 import { crawlSuccessCounter, jobDeadLetterCounter } from './metrics';
-import { CrawlJobData, isRetryableJobError, isValidCrawlJobData, isValidJobEnvelope, JobProcessingError, nonRetryableJobError } from '@seo/core';
+import { CrawlJobData, isRetryableJobError, isValidCrawlJobData, isValidJobEnvelope, JobProcessingError, nonRetryableJobError, retryableJobError } from '@seo/core';
 
 function isCrawlKillSwitchEnabled(): boolean {
   return process.env.CRAWL_KILL_SWITCH?.trim().toLowerCase() === 'true';
@@ -84,6 +84,7 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
 
   private async handleCrawlJob(job: Job<CrawlJobData>) {
     const { workspaceId, siteId, userAgent } = job.data;
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
 
     if (!isValidCrawlJobData(job.data)) {
       throw nonRetryableJobError(
@@ -118,87 +119,140 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     const url = `http://${siteResult[0].domain}`;
-    console.log(`Processing crawl job ${job.id} for site: ${siteId}`);
-
-    // 1. Invoke Go Crawler Service
+    
+    // 1. Invoke Go Crawler Service or load from S3 for Reprocessing
     let crawlResult;
-    try {
-      const response = await axios.post(this.crawlerApiUrl, {
-        url,
-        userAgent: userAgent || 'MavrykBot/1.0',
-      });
-      crawlResult = response.data;
-    } catch (error) {
-      console.error(`Go crawler API request failed for URL ${url}:`, error.message);
-      crawlSuccessCounter.inc({ status: 'failed', reason: 'api_request_failed' });
-      throw new Error(`Go Crawler API failed: ${error.message}`);
-    }
+    const reprocessKey = job.data.reprocessRawArtifactKey;
 
-    if (!crawlResult.success) {
-      const errStr = (crawlResult.error || '').toLowerCase();
-      if (errStr.includes('redirect') || errStr.includes('too many redirects') || errStr.includes('loop')) {
-        console.warn(`Redirect loop or issue detected for URL ${url}: ${crawlResult.error}`);
-        const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
-        const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
-        try {
-          await clickhouse.insert({
-            table: `${clickhouseDb}.crawl_page_observations`,
-            values: [
-              {
-                timestamp: timestampStr,
-                site_id: siteId,
-                url,
-                status_code: 310, // Standard loop code
-                title: '',
-                meta_description: '',
-                load_time_ms: 0,
-                page_size_bytes: 0,
-                word_count: 0,
-                issues: ['redirect_loop'],
-                canonical_url: '',
-              },
-            ],
-            format: 'JSONEachRow',
-          });
-          console.log(`Recorded redirect loop observation in ClickHouse for site: ${siteId}`);
-          crawlSuccessCounter.inc({ status: 'failed', reason: 'redirect_loop' });
-          return;
-        } catch (dbErr) {
-          console.error(`Failed to insert redirect loop to ClickHouse:`, dbErr.message);
-        }
-      } else if (errStr.includes('blocked by robots.txt')) {
-        console.warn(`Robots.txt block detected for URL ${url}: ${crawlResult.error}`);
-        const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
-        const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
-        try {
-          await clickhouse.insert({
-            table: `${clickhouseDb}.crawl_page_observations`,
-            values: [
-              {
-                timestamp: timestampStr,
-                site_id: siteId,
-                url,
-                status_code: 403,
-                title: '',
-                meta_description: '',
-                load_time_ms: 0,
-                page_size_bytes: 0,
-                word_count: 0,
-                issues: ['robots_blocked'],
-                canonical_url: '',
-              },
-            ],
-            format: 'JSONEachRow',
-          });
-          console.log(`Recorded robots.txt block observation in ClickHouse for site: ${siteId}`);
-          crawlSuccessCounter.inc({ status: 'failed', reason: 'robots_blocked' });
-          return;
-        } catch (dbErr) {
-          console.error(`Failed to insert robots.txt block to ClickHouse:`, dbErr.message);
-        }
+    if (reprocessKey) {
+      console.log(`Reprocessing raw crawl artifact from S3 for site: ${siteId}, key: ${reprocessKey}`);
+      try {
+        const getObj = await this.s3Client.send(
+          new GetObjectCommand({
+            Bucket: bucketName,
+            Key: reprocessKey,
+          })
+        );
+        const rawHtml = (await getObj.Body?.transformToString()) || '';
+        
+        // Simulating parsing of raw HTML on S3
+        const titleMatch = rawHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const title = titleMatch ? titleMatch[1].trim() : '';
+
+        const metaDescMatch = rawHtml.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i) || 
+                              rawHtml.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i);
+        const metaDescription = metaDescMatch ? metaDescMatch[1].trim() : '';
+
+        const robotsMatch = rawHtml.match(/<meta[^>]+name=["']robots["'][^>]+content=["']([^"']*)["']/i) ||
+                             rawHtml.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']robots["']/i);
+        const robotsMeta = robotsMatch ? robotsMatch[1].trim() : '';
+
+        const canonicalMatch = rawHtml.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']*)["']/i) ||
+                               rawHtml.match(/<link[^>]+href=["']([^"']*)["'][^>]+rel=["']canonical["']/i);
+        const canonicalUrl = canonicalMatch ? canonicalMatch[1].trim() : '';
+
+        // Clean HTML tags to count words
+        const textOnly = rawHtml.replace(/<[^>]+>/g, ' ');
+        const wordCount = textOnly.trim().split(/\s+/).filter(Boolean).length;
+
+        const storedStatusCode = getObj.Metadata?.statuscode || getObj.Metadata?.statusCode;
+        const statusCode = storedStatusCode ? parseInt(storedStatusCode, 10) : 200;
+
+        crawlResult = {
+          success: true,
+          statusCode,
+          title,
+          metaDescription,
+          robotsMeta,
+          canonicalUrl,
+          wordCount,
+          rawHtml,
+          loadTimeMs: 0,
+        };
+      } catch (err: any) {
+        console.error(`S3 retrieval failed for reprocessing:`, err.message);
+        throw retryableJobError('storage_failure', `Failed to retrieve raw S3 content for reprocessing: ${err.message}`);
       }
-      crawlSuccessCounter.inc({ status: 'failed', reason: crawlResult.error || 'unknown_crawler_error' });
-      throw new Error(`Go Crawler returned failure: ${crawlResult.error}`);
+    } else {
+      console.log(`Processing crawl job ${job.id} for site: ${siteId}`);
+      try {
+        const response = await axios.post(this.crawlerApiUrl, {
+          url,
+          userAgent: userAgent || 'MavrykBot/1.0',
+        });
+        crawlResult = response.data;
+      } catch (error) {
+        console.error(`Go crawler API request failed for URL ${url}:`, error.message);
+        crawlSuccessCounter.inc({ status: 'failed', reason: 'api_request_failed' });
+        throw new Error(`Go Crawler API failed: ${error.message}`);
+      }
+
+      if (!crawlResult.success) {
+        const errStr = (crawlResult.error || '').toLowerCase();
+        if (errStr.includes('redirect') || errStr.includes('too many redirects') || errStr.includes('loop')) {
+          console.warn(`Redirect loop or issue detected for URL ${url}: ${crawlResult.error}`);
+          const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
+          const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          try {
+            await clickhouse.insert({
+              table: `${clickhouseDb}.crawl_page_observations`,
+              values: [
+                {
+                  timestamp: timestampStr,
+                  site_id: siteId,
+                  url,
+                  status_code: 310, // Standard loop code
+                  title: '',
+                  meta_description: '',
+                  load_time_ms: 0,
+                  page_size_bytes: 0,
+                  word_count: 0,
+                  issues: ['redirect_loop'],
+                  canonical_url: '',
+                },
+              ],
+              format: 'JSONEachRow',
+            });
+            console.log(`Recorded redirect loop observation in ClickHouse for site: ${siteId}`);
+            crawlSuccessCounter.inc({ status: 'failed', reason: 'redirect_loop' });
+            return;
+          } catch (dbErr) {
+            console.error(`Failed to insert redirect loop to ClickHouse:`, dbErr.message);
+          }
+        } else if (errStr.includes('blocked by robots.txt')) {
+          console.warn(`Robots.txt block detected for URL ${url}: ${crawlResult.error}`);
+          const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
+          const timestampStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+          try {
+            await clickhouse.insert({
+              table: `${clickhouseDb}.crawl_page_observations`,
+              values: [
+                {
+                  timestamp: timestampStr,
+                  site_id: siteId,
+                  url,
+                  status_code: 403,
+                  title: '',
+                  meta_description: '',
+                  load_time_ms: 0,
+                  page_size_bytes: 0,
+                  word_count: 0,
+                  issues: ['robots_blocked'],
+                  canonical_url: '',
+                },
+              ],
+              format: 'JSONEachRow',
+            });
+            console.log(`Recorded robots.txt block observation in ClickHouse for site: ${siteId}`);
+            crawlSuccessCounter.inc({ status: 'failed', reason: 'robots_blocked' });
+            return;
+          } catch (dbErr) {
+            console.error(`Failed to insert robots.txt block to ClickHouse:`, dbErr.message);
+          }
+        }
+        crawlSuccessCounter.inc({ status: 'failed', reason: crawlResult.error || 'unknown_crawler_error' });
+        throw new Error(`Go Crawler returned failure: ${crawlResult.error}`);
+      }
     }
 
     console.log(`Successfully crawled ${url}. Status: ${crawlResult.statusCode}, wordCount: ${crawlResult.wordCount}`);
@@ -211,13 +265,27 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Fetch the actual jobRun.id for metadata tracking
+    let jobRunId = '';
+    try {
+      const jobRun = await db.select({ id: jobRuns.id })
+        .from(jobRuns)
+        .where(and(
+          eq(jobRuns.workspaceId, workspaceId),
+          eq(jobRuns.idempotencyKey, job.data.idempotencyKey)
+        ))
+        .limit(1);
+      jobRunId = jobRun[0]?.id || '';
+    } catch (err) {
+      console.warn(`Could not resolve jobRun.id in crawl processor: ${err.message}`);
+    }
+
     // 2. Store an immutable raw artifact before normalizing it into ClickHouse.
     // The run-scoped key preserves historical evidence; the legacy latest key only
     // supports detectors that have not yet been migrated to artifact references.
-    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
     const ingestionKey = job.data.ingestionKey || job.data.idempotencyKey;
     const urlHash = crypto.createHash('sha256').update(url).digest('hex');
-    const rawArtifactKey = `raw/crawl/${workspaceId}/${siteId}/${ingestionKey}/${urlHash}.html`;
+    const rawArtifactKey = `raw/crawl/${workspaceId}/${siteId}/${ingestionKey}/index.html`;
     const latestArtifactKey = `crawl/${siteId}/${urlHash}.html`;
 
     try {
@@ -231,6 +299,10 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
             workspace_id: workspaceId,
             site_id: siteId,
             ingestion_key: ingestionKey,
+            url: url,
+            crawledAt: new Date().toISOString(),
+            jobRunId: jobRunId,
+            statusCode: String(crawlResult.statusCode || 200),
           },
         }),
       );
@@ -328,6 +400,12 @@ export class CrawlProcessor implements OnModuleInit, OnModuleDestroy {
             word_count: crawlResult.wordCount || 0,
             issues,
             canonical_url: canonicalUrl,
+            job_run_id: jobRunId,
+            observed_at: timestampStr,
+            ingested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            schema_version: 'v1',
+            algorithm_version: reprocessKey ? 'v1.3.0-reprocessor' : 'v1.2.0-baseline',
+            source_origin: reprocessKey ? 'reprocess' : 'crawler',
           },
         ],
         format: 'JSONEachRow',

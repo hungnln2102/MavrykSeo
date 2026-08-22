@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Body, Query, Param, UseGuards, BadRequestExcept
 import { RecommendationsService } from './recommendations.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
+import { ProjectGuard } from '../tenancy/project.guard';
 import { CurrentWorkspace, CurrentRole } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
@@ -9,7 +10,7 @@ import { UserRole } from '@seo/core';
 import { AuditLog } from '../tenancy/audit-log.decorator';
 
 @Controller('recommendations')
-@UseGuards(AuthGuard, TenantGuard)
+@UseGuards(AuthGuard, TenantGuard, ProjectGuard)
 export class RecommendationsController {
   constructor(private readonly recommendationsService: RecommendationsService) {}
 

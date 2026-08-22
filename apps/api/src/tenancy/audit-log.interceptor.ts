@@ -54,6 +54,11 @@ export class AuditLogInterceptor implements NestInterceptor {
                 userAgent,
                 status: 'success',
                 bodyKeys: request.body ? Object.keys(request.body) : [],
+                ...(request.isSupportSession ? {
+                  impersonatedBySupport: true,
+                  supportSessionId: request.supportSessionId,
+                  supportReason: request.supportReason,
+                } : {}),
               },
             });
           } catch (err) {

@@ -12,7 +12,9 @@
                     "db:push":  "drizzle-kit push",
                     "db:migrate":  "drizzle-kit migrate",
                     "db:check":  "drizzle-kit check",
-                    "db:seed":  "tsc \u0026\u0026 node dist/seed.js"
+                    "db:seed":  "tsc && node dist/seed.js",
+                    "db:validate:standards": "tsc && node dist/validate-standards.js",
+                    "db:seed:standards": "tsc && node dist/seed-standards.js"
                 },
     "dependencies":  {
                          "drizzle-orm":  "^0.33.0",

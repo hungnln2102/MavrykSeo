@@ -162,8 +162,8 @@ async function runTests() {
       throw new Error(`Stored credentials do not match encrypted JSON format: ${e.message}`);
     }
 
-    // Retrieve via API GET: verify it is auto-decrypted back to plain text
-    console.log('  Retrieving integration credentials via API GET...');
+    // Retrieve metadata via API GET: OAuth credentials must never leave the server.
+    console.log('  Retrieving integration metadata via API GET...');
     const getRes = await fetch(`${API_URL}/projects/${testProject.id}/integrations/google_search_console`, {
       method: 'GET',
       headers: {
@@ -178,14 +178,10 @@ async function runTests() {
 
     const retrievedData = (await getRes.json()) as any;
 
-    if (
-      retrievedData.credentials &&
-      retrievedData.credentials.refresh_token === 'my-gsc-refresh-token-123456789'
-    ) {
-      console.log('  ✔ API response decryption verified: correctly returned plain text credentials.');
-    } else {
-      throw new Error(`API decryption mismatch: expected client-side decrypted values, got: ${JSON.stringify(retrievedData)}`);
+    if (retrievedData.credentials || JSON.stringify(retrievedData).includes('my-gsc-refresh-token-123456789')) {
+      throw new Error('CRITICAL SECURITY ISSUE: API response exposed integration credentials.');
     }
+    console.log('  API response verified: integration credentials remain server-side.');
 
     // Verify Audit Logging
     console.log('  Verifying audit log entry directly in database...');

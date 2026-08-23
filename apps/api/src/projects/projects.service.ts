@@ -268,6 +268,21 @@ export class ProjectsService {
       }
     }
 
+    // Auto-sync from Google API if GSC integration is active but no data yet
+    if (countData === 0 && hasRealGscIntegration) {
+      console.log('GSC integration active but no ClickHouse data. Auto-syncing from Google API...');
+      try {
+        const syncResult = await this.inlineSyncGsc(workspaceId, projectId);
+        if (syncResult.synced) {
+          console.log(`Auto-sync completed: ${syncResult.queryRowsCount} query rows, ${syncResult.pageRowsCount} page rows`);
+        } else {
+          console.log('Auto-sync skipped:', syncResult.reason);
+        }
+      } catch (err: any) {
+        console.error('Auto-sync failed:', err.message);
+      }
+    }
+
     // 3. Query aggregated GSC metrics
     const recentQuery = `
       SELECT 

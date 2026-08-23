@@ -159,7 +159,7 @@ export default function Page() {
 
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [activeTab]);
 
   // API states
   const [recs, setRecs] = useState<any[]>([]);
@@ -1277,6 +1277,13 @@ export default function Page() {
     fetchAuditRuns();
     fetchGscPerformance();
   }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans, fetchStandardsVersions, fetchAuditRuns, fetchGscPerformance]);
+
+  // Re-fetch dashboard data when switching to Dashboard tab
+  React.useEffect(() => {
+    if (activeTab === 'dashboard' && token && workspaceId && projectId) {
+      fetchGscPerformance();
+    }
+  }, [activeTab]);
 
   // Fetch controls when active version changes
   React.useEffect(() => {

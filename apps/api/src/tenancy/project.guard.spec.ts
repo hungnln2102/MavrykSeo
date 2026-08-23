@@ -133,10 +133,11 @@ describe('ProjectGuard & ScopingHelper', () => {
   });
 
   describe('ProjectGuard.canActivate', () => {
-    it('bypasses if no project context (projectId or sub-resource ID) is found', async () => {
+    it('throws ForbiddenException if no project context (projectId or sub-resource ID) is found', async () => {
       const context = createExecutionContext({ params: {}, body: {} });
-      const result = await guard.canActivate(context);
-      expect(result).toBe(true);
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        new ForbiddenException('Project context could not be resolved.')
+      );
     });
 
     it('validates project-membership if projectId is specified directly in route params', async () => {

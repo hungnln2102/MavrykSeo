@@ -7,6 +7,7 @@ import { CurrentUser, CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { CreateAuditRunDto, VerifyControlResultDto } from './dto/audits.dto';
 
 @Controller()
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -20,7 +21,7 @@ export class AuditsController {
   async createAuditRun(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { standardVersionId: string; scopeSnapshot?: any }
+    @Body() body: CreateAuditRunDto
   ) {
     return this.auditsService.createAuditRun(workspaceId, projectId, body.standardVersionId, body.scopeSnapshot);
   }
@@ -49,7 +50,7 @@ export class AuditsController {
     @CurrentWorkspace() workspaceId: string,
     @CurrentUser() user: { id: string },
     @Param('id') id: string,
-    @Body() body: { result: string; exceptionReason?: string }
+    @Body() body: VerifyControlResultDto
   ) {
     return this.auditsService.updateControlResult(
       workspaceId,

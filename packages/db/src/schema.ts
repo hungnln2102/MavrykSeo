@@ -323,6 +323,14 @@ export const auditControls = pgTable('audit_controls', {
   code: text('code').notNull(),
   phase: text('phase').notNull(),
   description: text('description').notNull(),
+  applicability: jsonb('applicability').$type<string[]>().default([]).notNull(),
+  evidenceLevel: text('evidence_level').default('A').notNull(),
+  scope: text('scope').default('domain').notNull(),
+  severity: text('severity').default('medium').notNull(),
+  method: text('method').default('').notNull(),
+  acceptanceCriteria: text('acceptance_criteria').default('').notNull(),
+  executorType: text('executor_type').default('manual').notNull(),
+  executorKey: text('executor_key').default('manual-verification').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
@@ -389,5 +397,200 @@ export const supportSessions = pgTable('support_sessions', {
 });
 export type SupportSession = typeof supportSessions.$inferSelect;
 export type NewSupportSession = typeof supportSessions.$inferInsert;
+
+export const magicLinks = pgTable('magic_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  email: text('email').notNull(),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  usedAt: timestamp('used_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type MagicLink = typeof magicLinks.$inferSelect;
+export type NewMagicLink = typeof magicLinks.$inferInsert;
+
+export const authSessions = pgTable('auth_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  refreshToken: text('refresh_token').notNull().unique(),
+  previousRefreshToken: text('previous_refresh_token').unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  revokedAt: timestamp('revoked_at'),
+  userAgent: text('user_agent'),
+  ipAddress: text('ip_address'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type AuthSession = typeof authSessions.$inferSelect;
+export type NewAuthSession = typeof authSessions.$inferInsert;
+
+// --- Phase 1: Audit Data Model & Unified Entities ---
+
+export const projectScopes = pgTable('project_scopes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  siteType: text('site_type').notNull(), // 'ecommerce' | 'local' | 'publisher' | 'lead-gen' | 'hybrid' | 'core'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqProjectScope: unique('uniq_project_scope_project').on(table.projectId),
+}));
+export type ProjectScope = typeof projectScopes.$inferSelect;
+export type NewProjectScope = typeof projectScopes.$inferInsert;
+
+export const projectMarkets = pgTable('project_markets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  country: text('country').notNull(),
+  language: text('language').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type ProjectMarket = typeof projectMarkets.$inferSelect;
+export type NewProjectMarket = typeof projectMarkets.$inferInsert;
+
+export const observations = pgTable('observations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  sourceType: text('source_type').notNull(), // 'crawler' | 'gsc' | 'ga4' | 'manual'
+  sourceRef: text('source_ref').notNull(), // URL, s3Key, API response hash
+  classification: text('classification').notNull(), // e.g. 'missing_title', 'missing_h1'
+  data: jsonb('data'), // Raw findings detail payload in JSON
+  observedAt: timestamp('observed_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type Observation = typeof observations.$inferSelect;
+export type NewObservation = typeof observations.$inferInsert;
+
+export const findings = pgTable('findings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  controlCode: text('control_code').notNull(), // e.g. 'TECH-IDX-001'
+  rootCauseKey: text('root_cause_key').notNull(), // to group and prevent duplication
+  normalizedScopeHash: text('normalized_scope_hash').notNull(),
+  severity: text('severity').notNull(), // 'critical' | 'high' | 'medium' | 'low' | 'opportunity'
+  confidence: text('confidence').default('medium').notNull(), // 'high' | 'medium' | 'low'
+  status: text('status').default('open').notNull(), // 'open' | 'muted' | 'resolved'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  uniqFindingKey: unique('uniq_finding_key').on(table.projectId, table.controlCode, table.rootCauseKey, table.normalizedScopeHash),
+}));
+export type Finding = typeof findings.$inferSelect;
+export type NewFinding = typeof findings.$inferInsert;
+
+export const findingObservations = pgTable('finding_observations', {
+  findingId: uuid('finding_id').notNull().references(() => findings.id, { onDelete: 'cascade' }),
+  observationId: uuid('observation_id').notNull().references(() => observations.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: unique('uniq_finding_observation').on(table.findingId, table.observationId),
+}));
+export type FindingObservation = typeof findingObservations.$inferSelect;
+export type NewFindingObservation = typeof findingObservations.$inferInsert;
+
+export const affectedEntities = pgTable('affected_entities', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  findingId: uuid('finding_id').notNull().references(() => findings.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(), // 'url' | 'page_template' | 'market_locale'
+  entityIdOrUrl: text('entity_id_or_url').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type AffectedEntity = typeof affectedEntities.$inferSelect;
+export type NewAffectedEntity = typeof affectedEntities.$inferInsert;
+
+export const actions = pgTable('actions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  projectId: uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  status: text('status').default('proposed').notNull(), // 'proposed' | 'validated' | 'accepted' | 'rejected' | 'assigned' | 'in_progress' | 'ready_for_qa' | 'monitoring' | 'done'
+  priority: text('priority').default('medium').notNull(), // 'critical' | 'high' | 'medium' | 'low'
+  ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  approverId: uuid('approver_id').references(() => users.id, { onDelete: 'set null' }),
+  dueAt: timestamp('due_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type Action = typeof actions.$inferSelect;
+export type NewAction = typeof actions.$inferInsert;
+
+export const actionFindings = pgTable('action_findings', {
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  findingId: uuid('finding_id').notNull().references(() => findings.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: unique('uniq_action_finding').on(table.actionId, table.findingId),
+}));
+export type ActionFinding = typeof actionFindings.$inferSelect;
+export type NewActionFinding = typeof actionFindings.$inferInsert;
+
+export const actionDependencies = pgTable('action_dependencies', {
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  dependsOnActionId: uuid('depends_on_action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: unique('uniq_action_dependency').on(table.actionId, table.dependsOnActionId),
+}));
+export type ActionDependency = typeof actionDependencies.$inferSelect;
+export type NewActionDependency = typeof actionDependencies.$inferInsert;
+
+export const actionComments = pgTable('action_comments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  comment: text('comment').notNull(),
+  isClientVisible: boolean('is_client_visible').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+export type ActionComment = typeof actionComments.$inferSelect;
+export type NewActionComment = typeof actionComments.$inferInsert;
+
+export const actionAttachments = pgTable('action_attachments', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  s3Key: text('s3_key').notNull(),
+  uploadedById: uuid('uploaded_by_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type ActionAttachment = typeof actionAttachments.$inferSelect;
+export type NewActionAttachment = typeof actionAttachments.$inferInsert;
+
+export const actionApprovals = pgTable('action_approvals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  approverId: uuid('approver_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  status: text('status').notNull(), // 'approved' | 'rejected'
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type ActionApproval = typeof actionApprovals.$inferSelect;
+export type NewActionApproval = typeof actionApprovals.$inferInsert;
+
+export const verificationRecords = pgTable('verification_records', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  verifierId: uuid('verifier_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  result: text('result').notNull(), // 'pass' | 'fail'
+  criteriaSnapshot: text('criteria_snapshot').notNull(),
+  evidence: text('evidence').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type VerificationRecord = typeof verificationRecords.$inferSelect;
+export type NewVerificationRecord = typeof verificationRecords.$inferInsert;
+
+export const measurementReviews = pgTable('measurement_reviews', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionId: uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  window: integer('window').notNull(), // e.g. 7 | 14 | 28 | 90 days
+  baseline: jsonb('baseline').notNull(),
+  result: jsonb('result').notNull(),
+  confounders: jsonb('confounders'),
+  confidence: text('confidence').notNull(), // 'high' | 'medium' | 'low'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type MeasurementReview = typeof measurementReviews.$inferSelect;
+export type NewMeasurementReview = typeof measurementReviews.$inferInsert;
+
 
 

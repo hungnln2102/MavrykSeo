@@ -14,6 +14,8 @@ export interface CrawlJobData extends JobEnvelope {
   userAgent?: string;
   ingestionKey: string;
   reprocessRawArtifactKey?: string;
+  targetUrl?: string;
+  isSitemapCrawl?: boolean;
 }
 
 export interface RankJobData extends JobEnvelope {

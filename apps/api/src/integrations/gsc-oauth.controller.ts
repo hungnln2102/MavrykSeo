@@ -7,6 +7,7 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import { AuthGuard } from "../auth/auth.guard";
@@ -18,6 +19,7 @@ import { TenantGuard } from "../tenancy/tenant.guard";
 import { IntegrationsService } from "./integrations.service";
 import { GscOAuthService } from "./gsc-oauth.service";
 import { GscSyncService } from "./gsc-sync.service";
+import { SelectPropertyDto, RequestSyncDto } from "./dto/gsc-oauth.dto";
 
 @Controller("projects/:projectId/integrations/google-search-console")
 @UseGuards(AuthGuard, TenantGuard, RolesGuard)
@@ -102,7 +104,7 @@ export class GscOAuthController {
   async selectProperty(
     @CurrentWorkspace() workspaceId: string,
     @Param("projectId") projectId: string,
-    @Body() body: { siteUrl?: string },
+    @Body() body: SelectPropertyDto,
   ) {
     const credentials =
       await this.integrationsService.getIntegrationCredentials(
@@ -129,7 +131,7 @@ export class GscOAuthController {
   requestSync(
     @CurrentWorkspace() workspaceId: string,
     @Param("projectId") projectId: string,
-    @Body() body: { startDate?: string; endDate?: string },
+    @Body() body: RequestSyncDto,
   ) {
     return this.gscSyncService.requestSync(workspaceId, projectId, body || {});
   }
@@ -156,24 +158,30 @@ export class GscOAuthCallbackController {
     @Query("code") code?: string,
     @Query("state") state?: string,
     @Query("error") error?: string,
+    @Res() reply?: any,
   ) {
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
+
     if (error) {
-      throw new BadRequestException(
-        "Google authorization was denied or cancelled",
-      );
+      reply!.redirect(`${frontendUrl}?gsc_error=${encodeURIComponent("Google authorization was denied or cancelled")}`);
+      return;
     }
 
-    const result = await this.gscOAuthService.exchangeAuthorizationCode(
-      code || "",
-      state || "",
-    );
-    const integration = await this.integrationsService.saveIntegration(
-      result.workspaceId,
-      result.projectId,
-      "google_search_console",
-      result.credentials,
-    );
+    try {
+      const result = await this.gscOAuthService.exchangeAuthorizationCode(
+        code || "",
+        state || "",
+      );
+      await this.integrationsService.saveIntegration(
+        result.workspaceId,
+        result.projectId,
+        "google_search_console",
+        result.credentials,
+      );
 
-    return { connected: true, integration };
+      reply!.redirect(`${frontendUrl}?gsc_connected=1&tab=settings`);
+    } catch (err: any) {
+      reply!.redirect(`${frontendUrl}?gsc_error=${encodeURIComponent(err.message || "OAuth failed")}`);
+    }
   }
 }

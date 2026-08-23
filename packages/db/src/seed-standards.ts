@@ -210,12 +210,14 @@ export async function seedStandards(filePath: string): Promise<void> {
       codeToModuleIdMap.set(mod.code, insertedMod.id);
     }
 
-    // 6.4. Seed controls
+    // 6.4. Seed controls with metadata
     for (const ctrl of controlsToInsert) {
       const moduleId = codeToModuleIdMap.get(ctrl.moduleIdCode);
       if (!moduleId) {
         throw new Error(`Module code ${ctrl.moduleIdCode} not found in database insertion map.`);
       }
+
+      const meta = resolveControlMetadata(ctrl.code, ctrl.description);
 
       await tx
         .insert(auditControls)
@@ -225,11 +227,124 @@ export async function seedStandards(filePath: string): Promise<void> {
           code: ctrl.code,
           phase: ctrl.phase,
           description: ctrl.description,
+          applicability: meta.applicability,
+          evidenceLevel: meta.evidenceLevel,
+          scope: meta.scope,
+          severity: meta.severity,
+          method: meta.method,
+          acceptanceCriteria: meta.acceptanceCriteria,
+          executorType: meta.executorType,
+          executorKey: meta.executorKey,
         });
     }
   });
 
   console.log('✓ Successfully completed Standards seeding transaction.');
+}
+
+export function resolveControlMetadata(code: string, description: string) {
+  let applicability: string[] = ['core'];
+  if (code.startsWith('ECOM-')) {
+    applicability = ['ecommerce'];
+  } else if (code.startsWith('LOCAL-')) {
+    applicability = ['local'];
+  } else if (code.startsWith('INT-') || code.startsWith('TECH-INT-')) {
+    applicability = ['international'];
+  } else if (code.startsWith('MEDIA-')) {
+    applicability = ['publisher'];
+  } else if (code.startsWith('MIG-')) {
+    applicability = ['migration'];
+  } else {
+    applicability = ['core'];
+  }
+
+  let severity = 'medium';
+  let evidenceLevel = 'A';
+  let scope = 'domain';
+  let executorType = 'manual';
+  let executorKey = 'manual-verification';
+  let method = `Kiểm tra thủ công tài nguyên liên quan đến: ${description}`;
+  let acceptanceCriteria = `Đảm bảo tiêu chuẩn ${code} được thiết lập đúng cấu trúc và không có cảnh báo.`;
+
+  if (code.startsWith('STR-')) {
+    severity = 'medium';
+    evidenceLevel = 'C';
+    scope = 'domain';
+    executorType = 'manual';
+  } else if (code.startsWith('DATA-')) {
+    severity = 'high';
+    evidenceLevel = 'A';
+    scope = 'domain';
+    executorType = 'manual';
+    acceptanceCriteria = `Các tài khoản và credentials API kết nối ổn định, dữ liệu đồng bộ thành công.`;
+  } else if (code.startsWith('TECH-HOST-')) {
+    severity = 'critical';
+    evidenceLevel = 'A';
+    scope = 'domain';
+    executorType = 'automated';
+    executorKey = 'host-dns-check';
+    method = 'Gửi HTTP request và kiểm tra trạng thái phản hồi DNS/HTTPS.';
+    acceptanceCriteria = 'Mã phản hồi HTTP là 200 OK và chứng chỉ SSL hợp lệ.';
+  } else if (code.startsWith('TECH-CRAWL-')) {
+    severity = 'high';
+    evidenceLevel = 'A';
+    scope = 'url';
+    executorType = 'automated';
+    executorKey = 'crawler-directives';
+    method = 'Quét robots.txt, sitemaps và HTTP headers.';
+    acceptanceCriteria = 'robots.txt hợp lệ và sitemap không chứa lỗi.';
+  } else if (code.startsWith('TECH-IDX-')) {
+    severity = 'critical';
+    evidenceLevel = 'A';
+    scope = 'url';
+    executorType = 'automated';
+    executorKey = 'indexing-status';
+    method = 'Phân tích response header X-Robots-Tag, meta tag noindex và canonical tag.';
+    acceptanceCriteria = 'Đường dẫn canonical trỏ về chính nó hoặc trang gốc hợp lệ và status code 200.';
+  } else if (code.startsWith('TECH-JS-')) {
+    severity = 'high';
+    evidenceLevel = 'A';
+    scope = 'url';
+    executorType = 'automated';
+    executorKey = 'javascript-renderer';
+    method = 'So sánh DOM structure giữa Raw HTML và Rendered HTML.';
+    acceptanceCriteria = 'Không xuất hiện lỗi render nghiêm trọng hay lệch nội dung.';
+  } else if (code.startsWith('TECH-CWV-')) {
+    severity = 'high';
+    evidenceLevel = 'B';
+    scope = 'url';
+    executorType = 'automated';
+    executorKey = 'pagespeed-vitals';
+    method = 'Gọi PageSpeed Insights API hoặc đo đạc dữ liệu thực tế (CrUX).';
+    acceptanceCriteria = 'Các chỉ số CWV (LCP, INP, CLS) nằm trong ngưỡng an toàn.';
+  } else if (code.startsWith('ONP-')) {
+    severity = 'high';
+    evidenceLevel = 'B';
+    scope = 'url';
+    executorType = 'automated';
+    executorKey = 'onpage-analyzer';
+    method = 'Quét các thẻ meta tags, title, headings và cấu trúc nội dung.';
+    acceptanceCriteria = 'Title và H1 tồn tại, meta description không trùng lặp.';
+  } else if (code.startsWith('KW-')) {
+    severity = 'medium';
+    evidenceLevel = 'B';
+    scope = 'domain';
+    executorType = 'automated';
+    executorKey = 'keyword-tracker';
+    method = 'Đối chiếu vị trí từ khóa trên công cụ tìm kiếm.';
+    acceptanceCriteria = 'Từ khóa được ánh xạ đến đúng target URL.';
+  }
+
+  return {
+    applicability,
+    evidenceLevel,
+    scope,
+    severity,
+    method,
+    acceptanceCriteria,
+    executorType,
+    executorKey,
+  };
 }
 
 // Support direct run

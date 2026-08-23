@@ -7,6 +7,7 @@ import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { SaveIntegrationDto } from './dto/integrations.dto';
 
 @Controller('projects/:projectId/integrations')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -21,11 +22,8 @@ export class IntegrationsController {
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
     @Param('provider') provider: string,
-    @Body() body: { credentials: any }
+    @Body() body: SaveIntegrationDto
   ) {
-    if (!body.credentials) {
-      throw new BadRequestException('credentials body is required');
-    }
     return this.integrationsService.saveIntegration(workspaceId, projectId, provider, body.credentials);
   }
 

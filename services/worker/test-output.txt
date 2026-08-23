@@ -1,0 +1,146 @@
+  console.log
+    [AuditRunCoordinator] Running audit analysis for run: run-1
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:9:13)
+
+  console.log
+    [Test Mock] whereMock call 1
+
+      at Object.<anonymous> (src/audit-run.coordinator.spec.ts:67:15)
+
+  console.log
+    [Test Mock] whereMock call 2
+
+      at Object.<anonymous> (src/audit-run.coordinator.spec.ts:67:15)
+
+  console.log
+    [Test Mock] whereMock call 3
+
+      at Object.<anonymous> (src/audit-run.coordinator.spec.ts:67:15)
+
+  console.log
+    [Test Mock] whereMock returning: [
+      {
+        id: 'res-1',
+        controlId: 'ctrl-1',
+        result: 'PASS',
+        controlCode: 'TECH-HOST-002'
+      },
+      {
+        id: 'res-2',
+        controlId: 'ctrl-2',
+        result: 'PASS',
+        controlCode: 'TECH-CRAWL-004'
+      },
+      {
+        id: 'res-3',
+        controlId: 'ctrl-3',
+        result: 'PASS',
+        controlCode: 'TECH-IDX-004'
+      },
+      {
+        id: 'res-4',
+        controlId: 'ctrl-4',
+        result: 'PASS',
+        controlCode: 'TECH-JS-001'
+      },
+      {
+        id: 'res-5',
+        controlId: 'ctrl-5',
+        result: 'PASS',
+        controlCode: 'TECH-CWV-001'
+      }
+    ]
+
+      at Object.<anonymous> (src/audit-run.coordinator.spec.ts:80:17)
+
+  console.log
+    [AuditRunCoordinator] Gathered data:
+            - Pages observations: 1
+            - Sitemap observations: 1
+            - Render observations: 1
+            - PageSpeed observations: 1
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:104:15)
+
+  console.log
+    LOOP RES: {
+      id: 'res-1',
+      controlId: 'ctrl-1',
+      result: 'PASS',
+      controlCode: 'TECH-HOST-002'
+    }
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:113:17)
+
+  console.log
+    LOOP RES: {
+      id: 'res-2',
+      controlId: 'ctrl-2',
+      result: 'PASS',
+      controlCode: 'TECH-CRAWL-004'
+    }
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:113:17)
+
+  console.log
+    LOOP RES: {
+      id: 'res-3',
+      controlId: 'ctrl-3',
+      result: 'PASS',
+      controlCode: 'TECH-IDX-004'
+    }
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:113:17)
+
+  console.log
+    LOOP RES: {
+      id: 'res-4',
+      controlId: 'ctrl-4',
+      result: 'PASS',
+      controlCode: 'TECH-JS-001'
+    }
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:113:17)
+
+  console.log
+    LOOP RES: {
+      id: 'res-5',
+      controlId: 'ctrl-5',
+      result: 'PASS',
+      controlCode: 'TECH-CWV-001'
+    }
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:113:17)
+
+  console.log
+    [AuditRunCoordinator] Successfully finished analysis for audit run: run-1
+
+      at AuditRunCoordinator.runAudit (src/audit-run.coordinator.ts:257:15)
+
+FAIL src/audit-run.coordinator.spec.ts
+  AuditRunCoordinator
+    × should evaluate controls and update DB correctly when crawl observations exist (27 ms)
+
+  ● AuditRunCoordinator › should evaluate controls and update DB correctly when crawl observations exist
+
+    expect(jest.fn()).toHaveBeenCalled()
+
+    Expected number of calls: >= 1
+    Received number of calls:    0
+
+    [0m [90m 128 |[39m
+     [90m 129 |[39m     expect(clickhouseQueryMock)[33m.[39mtoHaveBeenCalled()[33m;[39m
+    [31m[1m>[22m[39m[90m 130 |[39m     expect(insertMock)[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m     |[39m                        [31m[1m^[22m[39m
+     [90m 131 |[39m     expect(updateMock)[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 132 |[39m   })[33m;[39m
+     [90m 133 |[39m })[33m;[39m[0m
+
+      at Object.<anonymous> (src/audit-run.coordinator.spec.ts:130:24)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 total
+Snapshots:   0 total
+Time:        3.163 s, estimated 5 s
+Ran all test suites matching /src\\audit-run.coordinator.spec.ts/i.

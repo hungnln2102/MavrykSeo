@@ -27,6 +27,7 @@
     "@willsoto/nestjs-prometheus": "^6.1.0",
     "axios": "^1.19.0",
     "bullmq": "^5.8.0",
+    "playwright": "^1.49.0",
     "drizzle-orm": "^0.33.0",
     "ioredis": "^5.4.1",
     "prom-client": "^15.1.3",

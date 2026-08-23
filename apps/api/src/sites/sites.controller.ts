@@ -7,6 +7,7 @@ import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { CreateSiteDto, UpdateCrawlScheduleDto } from './dto/sites.dto';
 
 @Controller('sites')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -19,11 +20,8 @@ export class SitesController {
   @AuditLog('site.create', 'site')
   async createSite(
     @CurrentWorkspace() workspaceId: string,
-    @Body() body: { projectId: string; domain: string }
+    @Body() body: CreateSiteDto
   ) {
-    if (!body.projectId || !body.domain) {
-      throw new BadRequestException('projectId and domain are required');
-    }
     return this.sitesService.createSite(workspaceId, body.projectId, body.domain);
   }
 
@@ -56,12 +54,8 @@ export class SitesController {
   async updateCrawlSchedule(
     @CurrentWorkspace() workspaceId: string,
     @Param('siteId') siteId: string,
-    @Body() body: { crawlScheduleMinutes?: number | null },
+    @Body() body: UpdateCrawlScheduleDto,
   ) {
-    if (body.crawlScheduleMinutes !== null && body.crawlScheduleMinutes !== undefined
-      && (!Number.isInteger(body.crawlScheduleMinutes) || body.crawlScheduleMinutes < 60)) {
-      throw new BadRequestException('crawlScheduleMinutes must be null or an integer of at least 60 minutes');
-    }
     return this.sitesService.updateCrawlSchedule(workspaceId, siteId, body.crawlScheduleMinutes ?? null);
   }
 
@@ -74,6 +68,23 @@ export class SitesController {
     @Param('siteId') siteId: string,
   ) {
     return this.sitesService.getSiteCrawls(workspaceId, siteId);
+  }
+
+  @Get(':siteId/crawls/compare')
+  @AuditLog('site.crawl_compare.read', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async compareSiteCrawls(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+    @Query('baseJobRunId') baseJobRunId: string,
+    @Query('compareJobRunId') compareJobRunId: string,
+    @Query('url') url?: string,
+  ) {
+    if (!baseJobRunId || !compareJobRunId) {
+      throw new BadRequestException('baseJobRunId and compareJobRunId query parameters are required');
+    }
+    return this.sitesService.compareCrawls(workspaceId, siteId, baseJobRunId, compareJobRunId, url);
   }
 
   @Get(':siteId/crawls/:jobRunId/raw')

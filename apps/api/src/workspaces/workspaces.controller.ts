@@ -7,6 +7,7 @@ import { UserRole } from '@seo/core';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { CreateWorkspaceDto, AddMemberDto, UpdateWorkspacePlanDto, UpdateWorkspaceStatusDto, UpdateWhiteLabelDto } from './dto/workspaces.dto';
 
 @Controller('workspaces')
 @UseGuards(AuthGuard)
@@ -16,7 +17,7 @@ export class WorkspacesController {
   @Post()
   async createWorkspace(
     @CurrentUser() user: { id: string },
-    @Body() body: { name: string; slug: string }
+    @Body() body: CreateWorkspaceDto
   ) {
     return this.workspacesService.createWorkspace(user.id, body.name, body.slug);
   }
@@ -40,9 +41,9 @@ export class WorkspacesController {
   @Roles('owner', 'admin')
   async addMember(
     @CurrentWorkspace() workspaceId: string,
-    @Body() body: { email: string; role: UserRole }
+    @Body() body: AddMemberDto
   ) {
-    return this.workspacesService.addWorkspaceMember(workspaceId, body.email, body.role);
+    return this.workspacesService.addWorkspaceMember(workspaceId, body.email, body.role as UserRole);
   }
 
   @Patch('active/status')
@@ -51,7 +52,7 @@ export class WorkspacesController {
   @Roles('owner', 'admin')
   async updateStatus(
     @CurrentWorkspace() workspaceId: string,
-    @Body() body: { status: string }
+    @Body() body: UpdateWorkspaceStatusDto
   ) {
     return this.workspacesService.updateWorkspaceStatus(workspaceId, body.status);
   }
@@ -62,7 +63,7 @@ export class WorkspacesController {
   @Roles('owner', 'admin')
   async updatePlan(
     @CurrentWorkspace() workspaceId: string,
-    @Body() body: { plan: string }
+    @Body() body: UpdateWorkspacePlanDto
   ) {
     return this.workspacesService.updateWorkspacePlan(workspaceId, body.plan);
   }
@@ -73,7 +74,7 @@ export class WorkspacesController {
   @Roles('owner', 'admin')
   async updateWhiteLabel(
     @CurrentWorkspace() workspaceId: string,
-    @Body() body: { logo: string; colors: { primary: string; secondary: string } }
+    @Body() body: UpdateWhiteLabelDto
   ) {
     return this.workspacesService.updateWorkspaceWhiteLabel(workspaceId, body.logo, body.colors);
   }

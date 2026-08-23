@@ -419,16 +419,16 @@ Mọi endpoint thực thi server-side tenant scope, RBAC, audit log và idempote
 
 **Mục tiêu:** Đảm bảo hệ thống có cơ chế Authentication, Auditing và Authorization đáng tin cậy, cô lập hoàn toàn đa thuê (multi-tenant) và dự án (cross-project).
 
-- [ ] **P0-01: Thay thế phương thức Authentication**: Tái cấu trúc cơ chế phiên làm việc (AuthSession). Không cấp JWT trực tiếp chỉ bằng email. Thay thế bằng OIDC/OAuth, Passwords + MFA hoặc Magic link sử dụng một lần có chữ ký số. Cung cấp access token ngắn hạn, refresh token rotation và cơ chế thu hồi session (session revocation).
-- [ ] **P0-02: Loại bỏ Auto-login test account**: Triệt tiêu hoàn toàn logic tự động đăng nhập tài khoản test (`test@mavryk.io`) trong frontend (Next.js) khi khởi động. Thiết lập Route Guard ở cả middleware và NestJS controllers.
-- [ ] **P0-03: Project Guard dạng fail-closed**: Nâng cấp `ProjectGuard` phủ toàn bộ các routes liên quan đến tài nguyên dự án (site, recommendation, keyword, report...). Đảm bảo cơ chế từ chối mặc định (fail-closed) khi không phân giải được context `projectId`.
-- [ ] **P0-04: Global Validation**: Enforce `ValidationPipe` toàn cục trong NestJS Fastify app. Dùng DTO schemas (class-validator/Zod) với whitelist và reject unknown properties trên mọi body request.
-- [ ] **P0-05: CORS và CSP headers**: Thu hẹp CORS origin wildcards (`*`), cấu hình allowlist động theo môi trường. Thiết lập Security Headers và Content Security Policy (CSP).
+- [x] **P0-01: Thay thế phương thức Authentication**: Tái cấu trúc cơ chế phiên làm việc (AuthSession). Không cấp JWT trực tiếp chỉ bằng email. Thay thế bằng OIDC/OAuth, Passwords + MFA hoặc Magic link sử dụng một lần có chữ ký số. Cung cấp access token ngắn hạn, refresh token rotation và cơ chế thu hồi session (session revocation).
+- [x] **P0-02: Loại bỏ Auto-login test account**: Triệt tiêu hoàn toàn logic tự động đăng nhập tài khoản test (`test@mavryk.io`) trong frontend (Next.js) khi khởi động. Thiết lập Route Guard ở cả middleware và NestJS controllers.
+- [x] **P0-03: Project Guard dạng fail-closed**: Nâng cấp `ProjectGuard` phủ toàn bộ các routes liên quan đến tài nguyên dự án (site, recommendation, keyword, report...). Đảm bảo cơ chế từ chối mặc định (fail-closed) khi không phân giải được context `projectId`.
+- [x] **P0-04: Global Validation**: Enforce `ValidationPipe` toàn cục trong NestJS Fastify app. Dùng DTO schemas (class-validator/Zod) với whitelist và reject unknown properties trên mọi body request.
+- [x] **P0-05: CORS và CSP headers**: Thu hẹp CORS origin wildcards (`*`), cấu hình allowlist động theo môi trường. Thiết lập Security Headers và Content Security Policy (CSP).
 - [x] **P0-06: Tenant Isolation Suite**: Xây dựng bộ test suite thử nghiệm xâm nhập chéo tenant/project (negative testing) để xác thực tính cô lập dữ liệu (đã hoàn thành một phần).
-- [ ] **P0-07: Khai tử Mock/Fallback Evidence**: Khi thiếu dữ liệu crawler/GSC, hệ thống trả về kết quả `NEED_DATA`, nghiêm cấm tạo evidence hoặc findings giả.
-- [ ] **P0-08: Secret & Session Management**: Luân chuyển key (key rotation), mã hóa AES-256-GCM cho credentials, không cho phép default secrets tại môi trường production.
-- [ ] **P0-09: Full-stack Smoke Test**: Thiết lập E2E pipeline chạy thử nghiệm liên lạc từ API cho đến Worker, Crawler, database (PostgreSQL, ClickHouse), và S3 storage.
-- [ ] **P0-10: Production Config Validation**: Bổ sung cơ chế validate fail-fast cấu hình môi trường ngay khi khởi động dịch vụ.
+- [x] **P0-07: Khai tử Mock/Fallback Evidence**: Khi thiếu dữ liệu crawler/GSC, hệ thống trả về kết quả `NEED_DATA`, nghiêm cấm tạo evidence hoặc findings giả.
+- [x] **P0-08: Secret & Session Management**: Luân chuyển key (key rotation), mã hóa AES-256-GCM cho credentials, không cho phép default secrets tại môi trường production.
+- [x] **P0-09: Full-stack Smoke Test**: Thiết lập E2E pipeline chạy thử nghiệm liên lạc từ API cho đến Worker, Crawler, database (PostgreSQL, ClickHouse), và S3 storage.
+- [x] **P0-10: Production Config Validation**: Bổ sung cơ chế validate fail-fast cấu hình môi trường ngay khi khởi động dịch vụ.
 
 - **Acceptance Gate:** Không còn bất kỳ lỗ hổng bảo mật P0/Critical nào được báo cáo. 100% tenant/cross-project negative tests pass.
 
@@ -438,18 +438,18 @@ Mọi endpoint thực thi server-side tenant scope, RBAC, audit log và idempote
 
 **Mục tiêu:** Chuyển đổi 296 tiêu chuẩn SEO từ Markdown thành mô hình dạng máy đọc được (machine-readable) để tích hợp sâu vào Database và Ingestion Pipelines.
 
-- [ ] **P1-01: Machine-readable Control Registry**: Đồng bộ đầy đủ các siêu dữ liệu tiêu chuẩn (applicability, evidence levels, severity, source mappings, acceptance criteria) vào schema database, thay vì chỉ lưu trữ mã tiêu chí thô.
-- [ ] **P1-02: Applicability Profiles**: Phân phối tiêu chuẩn phù hợp theo loại website (Ecommerce, Local, Publisher) và thị trường (Market/Language).
-- [ ] **P1-03: Control-Executor-Evidence Map**: Thiết lập ánh xạ chính xác giữa từng tiêu chuẩn với executor tự động (detector job) hoặc form xác thực thủ công.
-- [ ] **P1-04: Hợp nhất Auditing Entity DTOs**: Tách bạch rõ ràng cấu trúc dữ liệu của Finding (phát hiện), Evidence Artifact (bằng chứng), Root Cause (nguyên nhân gốc), Action (hành động khắc phục) và Verification (QA kiểm chứng).
-- [ ] **P1-05: Evidence Viewer & Data Lineage**: Tích hợp giao diện hiển thị bằng chứng raw (raw HTML, console errors, screenshot) và trace ngược nguồn gốc (lineage) từ số liệu hiển thị về file log hoặc API response thô.
-- [ ] **P1-06: Versioned Deterministic Rules**: Phiên bản hóa các luật tính toán (detector versioning) để đảm bảo kết quả kiểm toán lịch sử không bị ảnh hưởng khi phát hành version checker mới.
-- [ ] **P1-07: Resumable Ingestion & Audit Job**: Xây dựng bộ BullMQ Orchestrator xử lý các jobs crawl và ingestion có khả năng resume, báo cáo sự cố và ghi nhận cost thực tế.
-- [ ] **P1-08: Secure API Connectors**: Hoàn thiện cổng kết nối GSC OAuth, GA4 data analytics, PageSpeed Insights/CrUX, Web-performance và Google Business Profile API.
-- [ ] **P1-09: Tái cơ cấu Frontend**: Chia nhỏ trang `page.tsx` khổng lồ thành cấu trúc thư mục dạng Module (overview, crawl, audits, findings, actions...), tích hợp typed API client tự động sinh từ Swagger/OpenAPI.
-- [ ] **P1-10: E2E Integration Coverage**: Bổ sung integration test tích hợp ClickHouse và MinIO S3 thô cho các detector.
-- [ ] **P1-11: Loại bỏ Hard Thresholds trong Detectors**: Điều chỉnh các quy tắc cứng nhắc (như giới hạn 60/160 ký tự cho title/meta) sang dạng cảnh báo (warning/opportunity) hoặc đo đạc qua pixel width thực tế.
-- [ ] **P1-12: Pin Dependency & Docker Version**: Khóa cố định các tag version của Docker images và package dependency.
+- [x] **P1-01: Machine-readable Control Registry**: Đồng bộ đầy đủ các siêu dữ liệu tiêu chuẩn (applicability, evidence levels, severity, source mappings, acceptance criteria) vào schema database, thay vì chỉ lưu trữ mã tiêu chí thô.
+- [x] **P1-02: Applicability Profiles**: Phân phối tiêu chuẩn phù hợp theo loại website (Ecommerce, Local, Publisher) và thị trường (Market/Language).
+- [x] **P1-03: Control-Executor-Evidence Map**: Thiết lập ánh xạ chính xác giữa từng tiêu chuẩn với executor tự động (detector job) hoặc form xác thực thủ công.
+- [x] **P1-04: Hợp nhất Auditing Entity DTOs**: Tách bạch rõ ràng cấu trúc dữ liệu của Finding (phát hiện), Evidence Artifact (bằng chứng), Root Cause (nguyên nhân gốc), Action (hành động khắc phục) và Verification (QA kiểm chứng).
+- [x] **P1-05: Evidence Viewer & Data Lineage**: Tích hợp giao diện hiển thị bằng chứng raw (raw HTML, console errors, screenshot) và trace ngược nguồn gốc (lineage) từ số liệu hiển thị về file log hoặc API response thô.
+- [x] **P1-06: Versioned Deterministic Rules**: Phiên bản hóa các luật tính toán (detector versioning) để đảm bảo kết quả kiểm toán lịch sử không bị ảnh hưởng khi phát hành version checker mới.
+- [x] **P1-07: Resumable Ingestion & Audit Job**: Xây dựng bộ BullMQ Orchestrator xử lý các jobs crawl và ingestion có khả năng resume, báo cáo sự cố và ghi nhận cost thực tế.
+- [x] **P1-08: Secure API Connectors**: Hoàn thiện cổng kết nối GSC OAuth, GA4 data analytics, PageSpeed Insights/CrUX, Web-performance và Google Business Profile API.
+- [x] **P1-09: Tái cơ cấu Frontend**: Chia nhỏ trang `page.tsx` khổng lồ thành cấu trúc thư mục dạng Module (overview, crawl, audits, findings, actions...), tích hợp typed API client tự động sinh từ Swagger/OpenAPI.
+- [x] **P1-10: E2E Integration Coverage**: Bổ sung integration test tích hợp ClickHouse và MinIO S3 thô cho các detector.
+- [x] **P1-11: Loại bỏ Hard Thresholds trong Detectors**: Điều chỉnh các quy tắc cứng nhắc (như giới hạn 60/160 ký tự cho title/meta) sang dạng cảnh báo (warning/opportunity) hoặc đo đạc qua pixel width thực tế.
+- [x] **P1-12: Pin Dependency & Docker Version**: Khóa cố định các tag version của Docker images và package dependency.
 
 - **Acceptance Gate:** Chạy thành công chuỗi workflow hoàn chỉnh: Connect sources → Crawl/Ingest → Control execution → Evidence generated → Findings logged → Action created.
 

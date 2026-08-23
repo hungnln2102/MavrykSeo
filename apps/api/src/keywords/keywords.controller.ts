@@ -6,6 +6,7 @@ import { ProjectGuard } from '../tenancy/project.guard';
 import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
+import { AddKeywordDto, ResearchKeywordDto, ClusterKeywordsDto } from './dto/keywords.dto';
 
 @Controller('projects/:projectId')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -18,7 +19,7 @@ export class KeywordsController {
   async addKeyword(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { keyword: string; targetUrl?: string },
+    @Body() body: AddKeywordDto,
   ) {
     return this.keywordsService.addKeyword(workspaceId, projectId, body.keyword, body.targetUrl);
   }
@@ -48,7 +49,7 @@ export class KeywordsController {
   async researchKeyword(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { keyword: string },
+    @Body() body: ResearchKeywordDto,
   ) {
     return this.keywordsService.researchKeyword(workspaceId, projectId, body.keyword);
   }
@@ -59,7 +60,7 @@ export class KeywordsController {
   async clusterKeywords(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { keywords: string[] },
+    @Body() body: ClusterKeywordsDto,
   ) {
     return this.keywordsService.clusterKeywords(workspaceId, projectId, body.keywords);
   }

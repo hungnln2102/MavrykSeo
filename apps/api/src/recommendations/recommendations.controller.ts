@@ -8,6 +8,7 @@ import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { UserRole } from '@seo/core';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { UpdateRecommendationStatusDto, UpdateRecommendationAssigneeDto, UpdateRecommendationNotesDto } from './dto/recommendations.dto';
 
 @Controller('recommendations')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -33,11 +34,8 @@ export class RecommendationsController {
   async updateStatus(
     @CurrentWorkspace() workspaceId: string,
     @Param('id') recommendationId: string,
-    @Body() body: { status: string }
+    @Body() body: UpdateRecommendationStatusDto
   ) {
-    if (!body.status) {
-      throw new BadRequestException('status in body is required');
-    }
     return this.recommendationsService.updateRecommendationStatus(workspaceId, recommendationId, body.status);
   }
 
@@ -48,7 +46,7 @@ export class RecommendationsController {
   async updateAssignee(
     @CurrentWorkspace() workspaceId: string,
     @Param('id') recommendationId: string,
-    @Body() body: { assigneeId: string | null }
+    @Body() body: UpdateRecommendationAssigneeDto
   ) {
     return this.recommendationsService.updateRecommendationAssignee(workspaceId, recommendationId, body.assigneeId);
   }
@@ -60,7 +58,7 @@ export class RecommendationsController {
   async updateNotes(
     @CurrentWorkspace() workspaceId: string,
     @Param('id') recommendationId: string,
-    @Body() body: { internalNotes?: string | null; clientNotes?: string | null }
+    @Body() body: UpdateRecommendationNotesDto
   ) {
     return this.recommendationsService.updateRecommendationNotes(
       workspaceId,

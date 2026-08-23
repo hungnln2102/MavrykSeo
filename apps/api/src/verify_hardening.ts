@@ -1,6 +1,5 @@
-import { db, users, workspaces, memberships, projects, integrations, auditLogs } from '@seo/db';
+import { db, users, workspaces, memberships, projects, integrations, auditLogs, magicLinks } from '@seo/db';
 import { eq, and, desc } from 'drizzle-orm';
-import { encryptToken, decryptToken } from '@seo/core';
 
 const API_URL = process.env.API_URL || 'http://localhost:3000';
 
@@ -37,14 +36,14 @@ async function runTests() {
     // ----------------------------------------------------
     // Test 2: Rate Limiting (Sensitive Routes Override)
     // ----------------------------------------------------
-    console.log('[Test 2] Verifying Rate Limiting on sensitive routes (/auth/login)...');
-    console.log('  Sending concurrent login requests (limit: 1 per sec)...');
+    console.log('[Test 2] Verifying Rate Limiting on sensitive routes (/auth/magic-link)...');
+    console.log('  Sending concurrent magic-link requests (limit: 1 per sec)...');
     
-    const loginPromises = Array.from({ length: 4 }).map(() =>
-      fetch(`${API_URL}/auth/login`, {
+    const loginPromises = Array.from({ length: 4 }).map((_, i) =>
+      fetch(`${API_URL}/auth/magic-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'rate_limit_test@example.com' }),
+        body: JSON.stringify({ email: `rate_limit_test_${i}@example.com` }),
       })
     );
 
@@ -95,19 +94,48 @@ async function runTests() {
 
     console.log(`  Created User: ${testUser.id}, Workspace: ${testWorkspace.id}, Project: ${testProject.id}`);
 
-    // Call Login endpoint to get a JWT token
-    const authRes = await fetch(`${API_URL}/auth/login`, {
+    // Call magic-link endpoint to create login token
+    console.log('  Triggering magic-link endpoint...');
+    const magicRes = await fetch(`${API_URL}/auth/magic-link`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: testEmail }),
     });
+
+    if (!magicRes.ok) {
+      throw new Error(`Magic link request failed: HTTP ${magicRes.status}`);
+    }
+
+    // Retrieve the token from database
+    console.log('  Retrieving magic link token from database...');
+    const dbMagicLinks = await db
+      .select()
+      .from(magicLinks)
+      .where(eq(magicLinks.email, testEmail))
+      .orderBy(desc(magicLinks.createdAt))
+      .limit(1);
+
+    if (dbMagicLinks.length === 0) {
+      throw new Error('Could not find generated magic token link in database.');
+    }
+
+    const magicToken = dbMagicLinks[0].token;
+
+    // Login with the Magic Token to get jwt token
+    console.log(`  Logging in with Magic Token: ${magicToken}`);
+    const authRes = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: magicToken }),
+    });
     
     if (!authRes.ok) {
-      throw new Error(`Login endpoint failed: HTTP ${authRes.status}`);
+      const dbgMsg = await authRes.text();
+      throw new Error(`Login endpoint failed: HTTP ${authRes.status} -- ${dbgMsg}`);
     }
     
     const { token } = (await authRes.json()) as any;
-    console.log('  ✔ JWT Authentication token retrieved successfully.');
+    console.log('  ✔ JWT Authentication and Refresh tokens retrieved successfully.');
 
     // Save GSC OAuth credentials via API
     const testCredentials = {
@@ -128,7 +156,8 @@ async function runTests() {
     });
 
     if (!saveRes.ok) {
-      throw new Error(`Failed to save integration credentials: HTTP ${saveRes.status}`);
+      const dbgMsg = await saveRes.text();
+      throw new Error(`Failed to save integration credentials: HTTP ${saveRes.status} -- ${dbgMsg}`);
     }
     console.log('  ✔ Credentials saved successfully.');
 
@@ -209,6 +238,7 @@ async function runTests() {
     await db.delete(projects).where(eq(projects.id, testProject.id));
     await db.delete(memberships).where(eq(memberships.workspaceId, testWorkspace.id));
     await db.delete(workspaces).where(eq(workspaces.id, testWorkspace.id));
+    await db.delete(magicLinks).where(eq(magicLinks.email, testEmail));
     await db.delete(users).where(eq(users.id, testUser.id));
     await db.delete(auditLogs).where(eq(auditLogs.workspaceId, testWorkspace.id));
     console.log('  ✔ Clean up complete.');

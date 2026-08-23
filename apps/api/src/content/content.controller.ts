@@ -7,6 +7,7 @@ import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { CreateTopicDto, CreateContentPlanDto, UpdateContentPlanDto, ImportUrlDto, OptimizeContentDto } from './dto/content.dto';
 
 @Controller('projects/:projectId')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -30,7 +31,7 @@ export class ContentController {
   async createTopic(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { name: string; parentId?: string; keywords?: string[] },
+    @Body() body: CreateTopicDto,
   ) {
     return this.contentService.createTopic(
       workspaceId,
@@ -58,15 +59,7 @@ export class ContentController {
   async createContentPlan(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: {
-      topicId?: string;
-      title: string;
-      primaryKeyword: string;
-      secondaryKeywords?: string[];
-      status?: string;
-      dueDate?: string;
-      assigneeId?: string;
-    },
+    @Body() body: CreateContentPlanDto,
   ) {
     return this.contentService.createContentPlan(workspaceId, projectId, body);
   }
@@ -79,17 +72,7 @@ export class ContentController {
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
     @Param('id') id: string,
-    @Body() body: {
-      topicId?: string | null;
-      title?: string;
-      primaryKeyword?: string;
-      secondaryKeywords?: string[];
-      status?: string;
-      dueDate?: string | null;
-      body?: string;
-      assigneeId?: string | null;
-      publishUrl?: string | null;
-    },
+    @Body() body: UpdateContentPlanDto,
   ) {
     return this.contentService.updateContentPlan(workspaceId, projectId, id, body);
   }
@@ -101,7 +84,7 @@ export class ContentController {
   async importUrl(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { url: string; primaryKeyword: string; topicId?: string },
+    @Body() body: ImportUrlDto,
   ) {
     return this.contentService.importUrl(
       workspaceId,
@@ -172,7 +155,7 @@ export class ContentController {
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
     @Param('id') id: string,
-    @Body() body: { bodyText: string },
+    @Body() body: OptimizeContentDto,
   ) {
     return this.contentService.optimizeContent(workspaceId, projectId, id, body.bodyText);
   }

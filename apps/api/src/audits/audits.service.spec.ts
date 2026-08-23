@@ -1,4 +1,4 @@
-import { db, projects, standardVersions, auditRuns, auditControls, auditControlResults } from '@seo/db';
+import { db, projects, standardVersions, auditRuns, auditControls, auditControlResults, projectScopes } from '@seo/db';
 import { eq, and } from 'drizzle-orm';
 import { AuditsService } from './audits.service';
 import { NotFoundException } from '@nestjs/common';
@@ -16,6 +16,7 @@ jest.mock('@seo/db', () => ({
   auditControls: { id: 'auditControls.id', versionId: 'auditControls.versionId', code: 'auditControls.code', phase: 'auditControls.phase', description: 'auditControls.description', moduleId: 'auditControls.moduleId' },
   auditControlResults: { id: 'auditControlResults.id', auditRunId: 'auditControlResults.auditRunId', controlId: 'auditControlResults.controlId', result: 'auditControlResults.result', exceptionReason: 'auditControlResults.exceptionReason', reviewerId: 'auditControlResults.reviewerId', updatedAt: 'auditControlResults.updatedAt' },
   auditModules: { id: 'auditModules.id', code: 'auditModules.code', name: 'auditModules.name' },
+  projectScopes: { id: 'projectScopes.id', projectId: 'projectScopes.projectId', siteType: 'projectScopes.siteType' },
 }));
 
 jest.mock('drizzle-orm', () => ({
@@ -70,26 +71,31 @@ describe('AuditsService', () => {
       const mockLimitVer = jest.fn().mockResolvedValue([{ id: 'ver-1' }]);
       const mockWhereVer = jest.fn(() => ({ limit: mockLimitVer }));
 
+      // 3. Mock projectScopeCheck
+      const mockLimitScope = jest.fn().mockResolvedValue([{ siteType: 'ecommerce' }]);
+      const mockWhereScope = jest.fn(() => ({ limit: mockLimitScope }));
+
       mockSelect
         .mockReturnValueOnce({ from: () => ({ where: mockWhereProj }) }) // project check
-        .mockReturnValueOnce({ from: () => ({ where: mockWhereVer }) }); // version check
+        .mockReturnValueOnce({ from: () => ({ where: mockWhereVer }) })  // version check
+        .mockReturnValueOnce({ from: () => ({ where: mockWhereScope }) }); // scope check
 
-      // 3. Mock insert run chain
+      // 4. Mock insert run chain
       const mockReturningRun = jest.fn().mockResolvedValue([{ id: 'run-1', projectId: 'proj-1', standardVersionId: 'ver-1' }]);
       const mockValuesRun = jest.fn(() => ({ returning: mockReturningRun }));
       mockInsert.mockReturnValueOnce({ values: mockValuesRun }); // auditRuns insert
 
-      // 4. Mock select controls of version
-      const mockWhereControls = jest.fn().mockResolvedValue([{ id: 'ctrl-1' }, { id: 'ctrl-2' }]);
+      // 5. Mock select controls of version
+      const mockWhereControls = jest.fn().mockResolvedValue([{ id: 'ctrl-1', applicability: ['ecommerce'] }, { id: 'ctrl-2', applicability: ['local'] }]);
       mockSelect.mockReturnValueOnce({ from: () => ({ where: mockWhereControls }) }); // select controls
 
-      // 5. Mock control results bulk insert
+      // 6. Mock control results bulk insert
       mockInsert.mockReturnValueOnce({ values: jest.fn().mockResolvedValue(null) });
 
       const newRun = await service.createAuditRun('ws-1', 'proj-1', 'ver-1');
       expect(newRun).toMatchObject({ id: 'run-1', projectId: 'proj-1', standardVersionId: 'ver-1' });
       expect(mockInsert).toHaveBeenCalledWith(auditRuns);
-      expect(mockSelect).toHaveBeenCalledTimes(3); // 3rd select is controls selection
+      expect(mockSelect).toHaveBeenCalledTimes(4); // 4 selects now
     });
   });
 

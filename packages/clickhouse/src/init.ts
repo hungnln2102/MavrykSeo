@@ -60,12 +60,58 @@ export async function initializeClickHouse() {
       word_count UInt32,
       issues Array(String),
       canonical_url String,
+      redirect_chain Array(String),
+      redirect_status_codes Array(UInt16),
+      robots_meta String,
       job_run_id String,
       observed_at DateTime,
       ingested_at DateTime,
       schema_version String,
       algorithm_version String,
       source_origin String
+    ) ENGINE = MergeTree()
+    ORDER BY (site_id, timestamp, url)`,
+
+    `CREATE TABLE IF NOT EXISTS ${targetDb}.sitemap_observations (
+      timestamp DateTime,
+      site_id UUID,
+      sitemap_url String,
+      crawled_url String,
+      job_run_id String,
+      observed_at DateTime
+    ) ENGINE = MergeTree()
+    ORDER BY (site_id, timestamp, sitemap_url, crawled_url)`,
+
+    `CREATE TABLE IF NOT EXISTS ${targetDb}.render_observations (
+      timestamp DateTime,
+      site_id UUID,
+      url String,
+      dynamic_html_length UInt32,
+      console_errors Array(String),
+      screenshot_s3_key String,
+      title_mismatch UInt8,
+      text_parity_percent Float64,
+      job_run_id String,
+      observed_at DateTime
+    ) ENGINE = MergeTree()
+    ORDER BY (site_id, timestamp, url)`,
+
+    `CREATE TABLE IF NOT EXISTS ${targetDb}.pagespeed_observations (
+      timestamp DateTime,
+      site_id UUID,
+      url String,
+      device String,
+      fcp_ms UInt32,
+      lcp_ms UInt32,
+      cls Float64,
+      fid_ms UInt32,
+      inp_ms UInt32,
+      performance_score Float64,
+      accessibility_score Float64,
+      best_practices_score Float64,
+      seo_score Float64,
+      job_run_id String,
+      observed_at DateTime
     ) ENGINE = MergeTree()
     ORDER BY (site_id, timestamp, url)`,
 
@@ -106,7 +152,19 @@ export async function initializeClickHouse() {
     await clickhouse.exec({
       query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS canonical_url String`,
     });
-    console.log('Successfully updated crawl_page_observations schema.');
+    console.log('Successfully updated crawl_page_observations schema for canonical_url.');
+
+    console.log(`Running ClickHouse schema migration for redirect_chain...`);
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS redirect_chain Array(String)`,
+    });
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS redirect_status_codes Array(UInt16)`,
+    });
+    await clickhouse.exec({
+      query: `ALTER TABLE ${targetDb}.crawl_page_observations ADD COLUMN IF NOT EXISTS robots_meta String`,
+    });
+    console.log('Successfully updated crawl_page_observations schema for redirect & robots_meta.');
 
     console.log(`Running ClickHouse schema migration for rank_observations device/country...`);
     await clickhouse.exec({

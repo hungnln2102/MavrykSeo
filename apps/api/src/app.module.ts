@@ -19,6 +19,8 @@ import { JobsModule } from './jobs/jobs.module';
 import { StandardsModule } from './standards/standards.module';
 import { AuditsModule } from './audits/audits.module';
 import { TenancyModule } from './tenancy/tenancy.module';
+import { FindingsModule } from './findings/findings.module';
+import { ActionsModule } from './actions/actions.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { TenancyModule } from './tenancy/tenancy.module';
     JobsModule,
     StandardsModule,
     AuditsModule,
+    FindingsModule,
+    ActionsModule,
     ThrottlerModule.forRoot([
       {
         name: 'short',

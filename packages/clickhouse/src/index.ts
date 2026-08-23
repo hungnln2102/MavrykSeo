@@ -122,6 +122,13 @@ class MockClickHouseClient {
   async query(params: { query: string; format?: string }) {
     console.log(`[Mock ClickHouse query]: ${params.query} (File: ${this.mockFilePath})`);
     const q = params.query.toLowerCase();
+
+    // Forward ALTER TABLE DELETE to exec
+    if (q.includes('alter table') && q.includes('delete where')) {
+      await this.exec({ query: params.query });
+      return { json: async () => [] };
+    }
+
     const dbData = this.readDb();
 
     let rows: any[] = [];
@@ -153,12 +160,103 @@ class MockClickHouseClient {
         latest_rank: row.rank,
         date: row.timestamp ? row.timestamp.split(' ')[0] : undefined,
       }));
-    } else if (q.includes('gsc_page_daily')) {
-      rows = dbData['gsc_page_daily'] || [];
-    } else if (q.includes('gsc_query_daily')) {
-      rows = dbData['gsc_query_daily'] || [];
     } else if (q.includes('crawl_page_observations')) {
-      rows = dbData['crawl_page_observations'] || [];
+      const allRows = dbData['crawl_page_observations'] || [];
+      if (q.includes('job_run_id') && q.includes('order by timestamp desc')) {
+        const ordered = [...allRows].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        rows = ordered.slice(0, 1);
+      } else if (q.includes('count()') && q.includes('status_code = 200')) {
+        const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
+        const filtered = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
+        const total = filtered.length;
+        const with_issues = filtered.filter(r => r.issues && r.issues.length > 0).length;
+        const success = filtered.filter(r => r.status_code === 200).length;
+        rows = [{ total, success, with_issues }];
+      } else {
+        rows = allRows;
+      }
+    } else if (q.includes('gsc_page_daily')) {
+      const allRows = dbData['gsc_page_daily'] || [];
+      const siteIdsMatch = params.query.match(/site_id\s+in\s+\(([^)]+)\)/i);
+      const siteIds = siteIdsMatch ? siteIdsMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+      const filteredBySite = allRows.filter(r => siteIds.length === 0 || siteIds.includes(r.site_id));
+
+      const todayVal = new Date();
+      let filtered: any[] = [];
+      if (q.includes('date >= today() - 30') || q.includes('subtractdays(today(), 30)')) {
+        const threshold = new Date();
+        threshold.setDate(todayVal.getDate() - 30);
+        filtered = filteredBySite.filter(r => new Date(r.date) >= threshold);
+      } else if (q.includes('date < today() - 30') || q.includes('date < subtractdays(today(), 30)')) {
+        const threshold30 = new Date();
+        threshold30.setDate(todayVal.getDate() - 30);
+        const threshold60 = new Date();
+        threshold60.setDate(todayVal.getDate() - 60);
+        filtered = filteredBySite.filter(r => {
+          const d = new Date(r.date);
+          return d >= threshold60 && d < threshold30;
+        });
+      } else {
+        filtered = filteredBySite;
+      }
+
+      if (q.includes('sum(clicks)') && q.includes('group by date')) {
+        // Group by Date chart query
+        const groupMap = new Map<string, { clicks: number; impressions: number }>();
+        for (const r of filtered) {
+          const val = groupMap.get(r.date) || { clicks: 0, impressions: 0 };
+          val.clicks += Number(r.clicks || 0);
+          val.impressions += Number(r.impressions || 0);
+          groupMap.set(r.date, val);
+        }
+        rows = Array.from(groupMap.entries()).map(([date, val]) => ({
+          date,
+          clicks: val.clicks,
+          impressions: val.impressions
+        })).sort((a, b) => a.date.localeCompare(b.date));
+      } else if (q.includes('sum(clicks)') || q.includes('sum(impressions)')) {
+        // Metrics aggregation query
+        const clicks = filtered.reduce((sum, r) => sum + Number(r.clicks || 0), 0);
+        const impressions = filtered.reduce((sum, r) => sum + Number(r.impressions || 0), 0);
+        const totalPos = filtered.reduce((sum, r) => sum + Number(r.position || 0), 0);
+        const position = filtered.length > 0 ? totalPos / filtered.length : 10;
+        rows = [{ clicks, impressions, position }];
+      } else {
+        rows = filtered;
+      }
+    } else if (q.includes('gsc_query_daily')) {
+      const allRows = dbData['gsc_query_daily'] || [];
+      const siteIdsMatch = params.query.match(/site_id\s+in\s+\(([^)]+)\)/i);
+      const siteIds = siteIdsMatch ? siteIdsMatch[1].split(',').map(s => s.trim().replace(/'/g, '')) : [];
+      let filtered = allRows.filter(r => siteIds.length === 0 || siteIds.includes(r.site_id));
+
+      const todayVal = new Date();
+      const threshold = new Date();
+      threshold.setDate(todayVal.getDate() - 30);
+      filtered = filtered.filter(r => new Date(r.date) >= threshold);
+
+      if (q.includes('group by query')) {
+        // Keywords listing query
+        const groupMap = new Map<string, { clicks: number; impressions: number; ctr: number; position: number; count: number }>();
+        for (const r of filtered) {
+          const val = groupMap.get(r.query) || { clicks: 0, impressions: 0, ctr: 0, position: 0, count: 0 };
+          val.clicks += Number(r.clicks || 0);
+          val.impressions += Number(r.impressions || 0);
+          val.ctr += Number(r.ctr || 0);
+          val.position += Number(r.position || 0);
+          val.count += 1;
+          groupMap.set(r.query, val);
+        }
+        rows = Array.from(groupMap.entries()).map(([query, val]) => ({
+          query,
+          clicks: val.clicks,
+          impressions: val.impressions,
+          ctr: val.ctr / val.count,
+          position: val.position / val.count
+        })).sort((a, b) => b.clicks - a.clicks).slice(0, 10);
+      } else {
+        rows = filtered;
+      }
     }
 
     return {

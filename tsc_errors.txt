@@ -1,0 +1,7 @@
+src/projects/projects.service.ts(165,300): error TS2552: Cannot find name 'job_run_id'. Did you mean 'jobRunId'?
+src/projects/projects.service.ts(166,337): error TS2552: Cannot find name 'job_run_id'. Did you mean 'jobRunId'?
+src/projects/projects.service.ts(167,332): error TS2552: Cannot find name 'job_run_id'. Did you mean 'jobRunId'?
+src/projects/projects.service.ts(168,323): error TS2552: Cannot find name 'job_run_id'. Did you mean 'jobRunId'?
+undefined
+E:\Project\MavrykSeo\apps\api:
+[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command failed with exit code 1: tsc --noEmit

@@ -7,6 +7,7 @@ import { CurrentWorkspace } from '../tenancy/decorators';
 import { Roles } from '../tenancy/roles.decorator';
 import { RolesGuard } from '../tenancy/roles.guard';
 import { AuditLog } from '../tenancy/audit-log.decorator';
+import { CreateReportDto } from './dto/reports.dto';
 
 @Controller('projects/:projectId/reports')
 @UseGuards(AuthGuard, TenantGuard, ProjectGuard)
@@ -28,7 +29,7 @@ export class ReportsController {
   async createReport(
     @CurrentWorkspace() workspaceId: string,
     @Param('projectId') projectId: string,
-    @Body() body: { title: string; type: string }
+    @Body() body: CreateReportDto
   ) {
     return this.reportsService.createReport(workspaceId, projectId, body.title, body.type);
   }

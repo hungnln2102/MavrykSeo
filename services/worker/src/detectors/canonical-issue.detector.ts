@@ -95,6 +95,25 @@ export class CanonicalIssueDetector {
           });
         }
 
+        // 2b. Query parameters & facet disputes check
+        try {
+          const urlObj = new URL(url);
+          const hasParams = urlObj.search && urlObj.search.length > 1; // has query params
+          if (hasParams && canonical.trim() === url.trim()) {
+            signals.push({
+              detector_type: 'canonical_issue',
+              url,
+              metrics: {
+                issue_type: 'canonical_mismatch',
+                canonical_url: canonical,
+                details: `The parameter/facet URL (${url}) has a self-referential canonical tag. Query parameter pages should canonicalize to the clean, parameter-free base URL (${urlObj.protocol}//${urlObj.host}${urlObj.pathname}) to prevent crawl-budget waste and duplicate indexing of identical content facets.`,
+              },
+            });
+          }
+        } catch (e) {
+          // ignore URL parsing errors
+        }
+
         // 3. Cycle / Loop detection (Page A canonicals to B, and B canonicals to A or forms a loop)
         const path = new Set<string>();
         let current = url;

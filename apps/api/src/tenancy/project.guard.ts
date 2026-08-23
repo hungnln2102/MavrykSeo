@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
 import { ScopingHelper } from './scoping.helper';
 import { UserRole } from '@seo/core';
-import { db, sites, recommendations, reports, keywords, auditRuns, topics, contentPlans, briefs, auditControlResults } from '@seo/db';
+import { db, sites, recommendations, reports, keywords, auditRuns, topics, contentPlans, briefs, auditControlResults, findings, actions } from '@seo/db';
 import { eq } from 'drizzle-orm';
 
 @Injectable()
@@ -65,6 +65,12 @@ export class ProjectGuard implements CanActivate {
         } else if (path.includes('/content/briefs/') || path.includes('/content/brief')) {
           const [res] = await db.select({ projectId: briefs.projectId }).from(briefs).where(eq(briefs.id, idParam)).limit(1);
           projectId = res?.projectId;
+        } else if (path.includes('/findings/')) {
+          const [res] = await db.select({ projectId: findings.projectId }).from(findings).where(eq(findings.id, idParam)).limit(1);
+          projectId = res?.projectId;
+        } else if (path.includes('/actions/')) {
+          const [res] = await db.select({ projectId: actions.projectId }).from(actions).where(eq(actions.id, idParam)).limit(1);
+          projectId = res?.projectId;
         }
       }
     }
@@ -75,8 +81,7 @@ export class ProjectGuard implements CanActivate {
     }
 
     if (!projectId) {
-      // If no project context can be resolved, bypass
-      return true;
+      throw new ForbiddenException('Project context could not be resolved.');
     }
 
     // 4. Verify project belongs to workspace

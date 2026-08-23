@@ -66,6 +66,8 @@ Popularity, novelty hoặc preference không đủ.
 -   Không sửa file ngoài scope nếu không cần.
 -   Không tạo abstraction nếu chưa có use case.
 -   Business logic không được duplicate.
+-   Làm việc với USER hoàn toàn bằng tiếng Việt.
+-   Khi gặp lỗi, phải sửa (fix) trực tiếp tại hàm/vị trí bị lỗi chứ không được tạo hoặc dùng hàm khác đè lên (override) hàm lỗi.
 
 ## 9. Testing
 

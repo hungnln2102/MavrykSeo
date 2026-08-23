@@ -4,6 +4,7 @@ import { eq, and, count, inArray, desc } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { createJobEnvelope, CrawlJobData } from '@seo/core';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class SitesService {
@@ -347,5 +348,98 @@ export class SitesService {
     } catch (err) {
       throw new NotFoundException(`Failed to retrieve raw HTML from storage: ${err.message}`);
     }
+  }
+
+  async compareCrawls(
+    workspaceId: string,
+    siteId: string,
+    baseJobRunId: string,
+    compareJobRunId: string,
+    urlStr?: string
+  ) {
+    const siteResult = await db
+      .select({ projectId: sites.projectId, domain: sites.domain })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    const site = siteResult[0];
+
+    const baseRunResult = await db
+      .select({ ingestionKey: jobRuns.ingestionKey })
+      .from(jobRuns)
+      .where(and(eq(jobRuns.id, baseJobRunId), eq(jobRuns.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (baseRunResult.length === 0) {
+      throw new NotFoundException('Base crawl job run not found');
+    }
+
+    const compareRunResult = await db
+      .select({ ingestionKey: jobRuns.ingestionKey })
+      .from(jobRuns)
+      .where(and(eq(jobRuns.id, compareJobRunId), eq(jobRuns.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (compareRunResult.length === 0) {
+      throw new NotFoundException('Compare crawl job run not found');
+    }
+
+    const baseIngestionKey = baseRunResult[0].ingestionKey;
+    const compareIngestionKey = compareRunResult[0].ingestionKey;
+
+    if (!baseIngestionKey || !compareIngestionKey) {
+      throw new BadRequestException('Crawls are not in a comparable state (missing ingestion keys)');
+    }
+
+    let targetUrl = urlStr;
+    if (!targetUrl) {
+      targetUrl = `https://${site.domain}/`;
+    }
+
+    const urlHash = crypto.createHash('sha256').update(targetUrl).digest('hex');
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+
+    const baseKey = `raw/crawl/${workspaceId}/${siteId}/${baseIngestionKey}/${urlHash}.html`;
+    const compareKey = `raw/crawl/${workspaceId}/${siteId}/${compareIngestionKey}/${urlHash}.html`;
+
+    let baseHtml = '';
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: baseKey,
+        })
+      );
+      baseHtml = await response.Body?.transformToString() || '';
+    } catch {
+      // Keep empty if not found
+    }
+
+    let compareHtml = '';
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: compareKey,
+        })
+      );
+      compareHtml = await response.Body?.transformToString() || '';
+    } catch {
+      // Keep empty if not found
+    }
+
+    return {
+      url: targetUrl,
+      baseJobRunId,
+      compareJobRunId,
+      baseHtml,
+      compareHtml,
+    };
   }
 }

@@ -1,6 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
+
+import DashboardTab from './tabs/DashboardTab';
+import ContentPlannerTab from './tabs/ContentPlannerTab';
+import RankTrackerTab from './tabs/RankTrackerTab';
+import AuditTab from './tabs/AuditTab';
+import StandardsTab from './tabs/StandardsTab';
+import ReportsTab from './tabs/ReportsTab';
+import BacklinksTab from './tabs/BacklinksTab';
+import SettingsTab from './tabs/SettingsTab';
 import {
   LayoutDashboard,
   TrendingUp,
@@ -27,48 +36,6 @@ import {
   Loader2,
   FileText
 } from 'lucide-react';
-
-function renderProvenanceBadge(type: 'observed' | 'derived' | 'estimated' | 'ai') {
-  let text = '';
-  let bg = '';
-  let color = '';
-  if (type === 'observed') {
-    text = 'Observed';
-    bg = 'rgba(59, 130, 246, 0.1)';
-    color = 'rgb(147, 197, 253)';
-  } else if (type === 'derived') {
-    text = 'Derived';
-    bg = 'rgba(245, 158, 11, 0.1)';
-    color = 'rgb(253, 186, 116)';
-  } else if (type === 'estimated') {
-    text = 'Estimated';
-    bg = 'rgba(16, 185, 129, 0.1)';
-    color = 'rgb(167, 243, 208)';
-  } else if (type === 'ai') {
-    text = 'AI-Generated';
-    bg = 'rgba(139, 92, 246, 0.1)';
-    color = 'rgb(196, 181, 253)';
-  }
-
-  return (
-    <span style={{
-      fontSize: '0.65rem',
-      fontWeight: 650,
-      padding: '0.1rem 0.35rem',
-      borderRadius: '3px',
-      marginLeft: '0.35rem',
-      background: bg,
-      color: color,
-      border: `1px solid ${color.replace('rgb', 'rgba').replace(')', ', 0.25)')}`,
-      textTransform: 'uppercase',
-      letterSpacing: '0.025em',
-      verticalAlign: 'middle',
-      display: 'inline-block'
-    }}>
-      {text}
-    </span>
-  );
-}
 
 export default function Page() {
   const [selectedSite, setSelectedSite] = useState('mavryk.io');
@@ -98,6 +65,10 @@ export default function Page() {
 
   const [performanceData, setPerformanceData] = useState<any>(null);
   const [loadingPerformance, setLoadingPerformance] = useState(false);
+
+  const [gscPerformance, setGscPerformance] = useState<any>(null);
+  const [loadingGsc, setLoadingGsc] = useState(false);
+
 
   const [decayedPlansList, setDecayedPlansList] = useState<any[]>([]);
   const [loadingDecay, setLoadingDecay] = useState(false);
@@ -226,11 +197,24 @@ export default function Page() {
         setApiLoading(true);
         setApiError(null);
 
-        // 1. Auto-login
+        // 1. Request magic-link and login
+        const magicLinkRes = await fetch('http://localhost:3000/auth/magic-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'demo.owner@example.test' }),
+        });
+
+        if (!magicLinkRes.ok) {
+          throw new Error('Failed to request magic link');
+        }
+
+        const magicLinkData = await magicLinkRes.json();
+        const magicToken = magicLinkData.token;
+
         const loginRes = await fetch('http://localhost:3000/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'test@mavryk.io' }),
+          body: JSON.stringify({ token: magicToken }),
         });
 
         if (!loginRes.ok) {
@@ -298,6 +282,25 @@ export default function Page() {
         setRecs(recommendationsList);
         
         (window as any)._apiCtx = { token: jwtToken, workspaceId: wsId };
+
+        // Handle GSC OAuth callback query params
+        const urlParams = new URLSearchParams(window.location.search);
+        const gscConnected = urlParams.get('gsc_connected');
+        const gscErrorParam = urlParams.get('gsc_error');
+        const tabParam = urlParams.get('tab');
+
+        if (gscConnected === '1' || tabParam === 'settings') {
+          setActiveTab('settings');
+        }
+        if (gscErrorParam) {
+          console.error('GSC OAuth error:', gscErrorParam);
+        }
+
+        // Clean up URL query params
+        if (gscConnected || gscErrorParam || tabParam) {
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, '', cleanUrl);
+        }
       } catch (err: any) {
         console.error('API Initialization error:', err);
         setApiError(err.message);
@@ -1238,6 +1241,28 @@ export default function Page() {
     }
   }, [token, workspaceId, projectId]);
 
+  const fetchGscPerformance = React.useCallback(async () => {
+    if (!token || !workspaceId || !projectId) return;
+
+    try {
+      setLoadingGsc(true);
+      const res = await fetch(`http://localhost:3000/projects/${projectId}/gsc-performance`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-workspace-id': workspaceId,
+        },
+      });
+
+      if (res.ok) {
+        setGscPerformance(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching GSC performance data:', err);
+    } finally {
+      setLoadingGsc(false);
+    }
+  }, [token, workspaceId, projectId]);
+
   // Fetch Topics, Content Plans, Sites, Keywords, Members, Reports when token, workspaceId or projectId change
   React.useEffect(() => {
     if (!token || !workspaceId || !projectId) return;
@@ -1250,7 +1275,8 @@ export default function Page() {
     fetchDecayedPlans();
     fetchStandardsVersions();
     fetchAuditRuns();
-  }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans, fetchStandardsVersions, fetchAuditRuns]);
+    fetchGscPerformance();
+  }, [token, workspaceId, projectId, fetchTopics, fetchContentPlans, fetchSites, fetchKeywords, fetchMembers, fetchReports, fetchDecayedPlans, fetchStandardsVersions, fetchAuditRuns, fetchGscPerformance]);
 
   // Fetch controls when active version changes
   React.useEffect(() => {
@@ -1531,73 +1557,36 @@ export default function Page() {
   // Dynamic data mockups
   const sites = ['mavryk.io', 'seo-platform.dev', 'e-commerce-shop.com'];
 
-  const metrics = [
-    { label: 'Total Clicks', value: '42.8K', change: '+14.2%', positive: true, icon: Activity, provenance: 'observed' },
-    { label: 'Avg. CTR', value: '3.4%', change: '+0.8%', positive: true, icon: TrendingUp, provenance: 'derived' },
-    { label: 'Avg. Position', value: '11.2', change: '-2.4', positive: true, icon: Sparkles, provenance: 'observed' },
-    { label: 'Crawl Health', value: '98%', change: '0%', positive: true, icon: CheckCircle2, provenance: 'derived' }
-  ];
+  const iconMap: Record<string, any> = React.useMemo(() => ({
+    Activity,
+    TrendingUp,
+    Sparkles,
+    CheckCircle2
+  }), []);
 
-  const keywords = [
-    { query: 'seo automated tool', clicks: 1240, impressions: 8400, ctr: '14.7%', pos: 2.4 },
-    { query: 'ai ranking software', clicks: 942, impressions: 12100, ctr: '7.8%', pos: 4.1 },
-    { query: 'nextjs seo template', clicks: 612, impressions: 5800, ctr: '10.5%', pos: 1.8 },
-    { query: 'automatic index google', clicks: 580, impressions: 18400, ctr: '3.1%', pos: 8.9 },
-    { query: 'content decay tool', clicks: 430, impressions: 3200, ctr: '13.4%', pos: 3.5 }
-  ];
+  const mappedMetrics = React.useMemo(() => {
+    if (!gscPerformance?.metrics) return [];
+    return gscPerformance.metrics.map((m: any) => ({
+      ...m,
+      icon: iconMap[m.iconName] || Activity
+    }));
+  }, [gscPerformance, iconMap]);
 
-  const staticActions = [
-    {
-      id: 'mock-1',
-      title: 'Fix 14 Orphan Pages',
-      description: 'Found 14 pages with no incoming internal links. Critical for PageRank distribution.',
-      priority: 'high',
-      status: 'pending',
-      impactScore: 85,
-    },
-    {
-      id: 'mock-2',
-      title: 'Optimize Content Decay: /blog/seo-guide',
-      description: 'Traffic dropped by 34% over the last 90 days. Update outdated sections.',
-      priority: 'high',
-      status: 'pending',
-      impactScore: 80,
-    },
-    {
-      id: 'mock-3',
-      title: 'Target striking distance keyword "seo audit checklist"',
-      description: 'Currently ranking #11. Adding 2 high-quality internal links could push it to page 1.',
-      priority: 'medium',
-      status: 'pending',
-      impactScore: 75,
-    }
-  ];
+  const displayRecs = recs;
 
-  const displayRecs = recs.length > 0 ? recs : staticActions;
-
-  const paddingX = 50;
-  const chartW = (chartWidth || 800) - paddingX * 2;
-  const interval = chartW / 5;
-  const x0 = paddingX;
-  const x1 = paddingX + interval;
-  const x2 = paddingX + interval * 2;
-  const x3 = paddingX + interval * 3;
-  const x4 = paddingX + interval * 4;
-  const x5 = paddingX + interval * 5;
-  const ctrlX1 = paddingX + interval / 2;
 
   return (
     <main className="dashboard-layout">
       {/* Sidebar Navigation */}
-      <aside className={'dashboard-sidebar'} style={styles.sidebar}>
-        <div style={styles.logoContainer}>
-          <div style={styles.logoGlow}></div>
-          <span style={styles.logoText}>Mavryk<span style={{ color: 'var(--accent-secondary)' }}>Seo</span></span>
+      <aside className="sidebar">
+        <div className="sidebar__logo-wrap">
+          <div className="sidebar__logo-glow"></div>
+          <span className="sidebar__logo-text">Mavryk<span className="sidebar__logo-text--highlight">Seo</span></span>
         </div>
 
         {/* Workspace/Site Selector */}
-        <div style={styles.siteSelectorContainer}>
-          <div style={styles.siteSelectorCard}>
+        <div className="sidebar__site-selector">
+          <div className="sidebar__selector-card">
             <Globe size={16} color="var(--accent-primary)" />
             <select
               value={selectedSite}
@@ -1607,7 +1596,7 @@ export default function Page() {
                 const matched = sitesList.find(s => s.domain === domain);
                 if (matched) setActiveSite(matched);
               }}
-              style={styles.selectInput}
+              className="sidebar__select-input"
             >
               {sitesList.map((s) => (
                 <option key={s.id} value={s.domain}>{s.domain}</option>
@@ -1621,62 +1610,62 @@ export default function Page() {
         </div>
 
         {/* Nav Links */}
-        <nav aria-label={'Primary navigation'} className={'dashboard-navigation'} style={styles.navMenu}>
+        <nav aria-label={'Primary navigation'} className="sidebar__nav-menu">
           <button
             onClick={() => setActiveTab('dashboard')}
-            style={{ ...styles.navItem, ...(activeTab === 'dashboard' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'dashboard' ? 'sidebar__nav-item--active' : ''}`}
           >
             <LayoutDashboard size={18} />
             <span>Dashboard</span>
-            {activeTab === 'dashboard' && <div style={styles.activeDot} />}
+            {activeTab === 'dashboard' && <div className="sidebar__nav-item-dot" />}
           </button>
           <button
             onClick={() => setActiveTab('content')}
-            style={{ ...styles.navItem, ...(activeTab === 'content' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'content' ? 'sidebar__nav-item--active' : ''}`}
           >
             <Sparkles size={18} />
             <span>Content Planner</span>
-            {activeTab === 'content' && <div style={styles.activeDot} />}
+            {activeTab === 'content' && <div className="sidebar__nav-item-dot" />}
           </button>
           <button
             onClick={() => setActiveTab('keywords')}
-            style={{ ...styles.navItem, ...(activeTab === 'keywords' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'keywords' ? 'sidebar__nav-item--active' : ''}`}
           >
             <TrendingUp size={18} />
             <span>Rank Tracker</span>
           </button>
           <button
             onClick={() => setActiveTab('audit')}
-            style={{ ...styles.navItem, ...(activeTab === 'audit' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'audit' ? 'sidebar__nav-item--active' : ''}`}
           >
             <Search size={18} />
             <span>Audit Site</span>
           </button>
           <button
             onClick={() => setActiveTab('standards')}
-            style={{ ...styles.navItem, ...(activeTab === 'standards' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'standards' ? 'sidebar__nav-item--active' : ''}`}
           >
             <BookOpen size={18} />
             <span>SEO Standards</span>
           </button>
           <button
             onClick={() => setActiveTab('backlinks')}
-            style={{ ...styles.navItem, ...(activeTab === 'backlinks' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'backlinks' ? 'sidebar__nav-item--active' : ''}`}
           >
             <Link2 size={18} />
             <span>Backlinks</span>
           </button>
           <button
             onClick={() => setActiveTab('reports')}
-            style={{ ...styles.navItem, ...(activeTab === 'reports' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'reports' ? 'sidebar__nav-item--active' : ''}`}
           >
             <FileText size={18} />
             <span>Báo cáo</span>
-            {activeTab === 'reports' && <div style={styles.activeDot} />}
+            {activeTab === 'reports' && <div className="sidebar__nav-item-dot" />}
           </button>
           <button
             onClick={() => setActiveTab('settings')}
-            style={{ ...styles.navItem, ...(activeTab === 'settings' ? styles.navItemActive : {}) }}
+            className={`sidebar__nav-item ${activeTab === 'settings' ? 'sidebar__nav-item--active' : ''}`}
           >
             <Settings size={18} />
             <span>Settings</span>
@@ -1684,25 +1673,25 @@ export default function Page() {
         </nav>
 
         {/* User Card */}
-        <div style={styles.userCardContainer}>
-          <div style={styles.userCard}>
-            <div style={styles.avatar}>
+        <div className="sidebar__user-wrap">
+          <div className="sidebar__user-card">
+            <div className="sidebar__user-avatar">
               <User size={16} color="var(--text-primary)" />
             </div>
-            <div style={styles.userInfo}>
-              <div style={styles.userName}>Mavryk Agency</div>
-              <div style={styles.userRole}>Workspace Owner</div>
+            <div className="sidebar__user-info">
+              <div className="sidebar__user-name">Mavryk Agency</div>
+              <div className="sidebar__user-role">Workspace Owner</div>
             </div>
           </div>
         </div>
       </aside>
 
       {/* Main Panel Content */}
-      <section className={'dashboard-content'} style={styles.mainContent}>
+      <section className="dashboard-main">
         {/* Header */}
-        <header className={'dashboard-header'} style={styles.header}>
+        <header className="dashboard-header">
           <div>
-            <h1 style={styles.headerTitle}>
+            <h1 className="dashboard-header__title">
               {activeTab === 'dashboard' && 'SEO Dashboard'}
               {activeTab === 'content' && 'Content Marketing'}
               {activeTab === 'keywords' && 'Rank Tracker'}
@@ -1712,21 +1701,21 @@ export default function Page() {
               {activeTab === 'reports' && 'Báo cáo White-label'}
               {activeTab === 'settings' && 'Settings'}
             </h1>
-            <p style={styles.headerSubtitle}>
+            <p className="dashboard-header__subtitle">
               {activeTab === 'dashboard' && 'Real-time Google Search Console & Audit Insights for '}
               {activeTab === 'content' && 'Plan, outline, and optimize your content authority for '}
               {activeTab === 'standards' && 'Quản lý chuẩn SEO và kiểm tra checklist nội bộ cho '}
               {activeTab !== 'dashboard' && activeTab !== 'content' && activeTab !== 'standards' && 'Manage your '}
-              <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{selectedSite}</span>
+              <span className="dashboard-header__site-name">{selectedSite}</span>
             </p>
           </div>
-          <div className={'dashboard-header-actions'} style={styles.headerActions}>
-            <button style={styles.iconButton}>
+          <div className="dashboard-header__actions">
+            <button className="dashboard-header__icon-btn">
               <Bell size={18} />
-              <div style={styles.notificationBadge} />
+              <div className="dashboard-header__notification-badge" />
             </button>
-            <div style={styles.divider} />
-            <button className={'dashboard-ai-action'} style={styles.actionButton}>
+            <div className="dashboard-header__divider" />
+            <button className="dashboard-header__action-btn">
               <Sparkles size={16} />
               <span>AI recommendations</span>
             </button>
@@ -1734,2970 +1723,265 @@ export default function Page() {
         </header>
 
         {activeTab === 'dashboard' && (
-          <>
-            {/* Metrics Grid */}
-            <div className={'dashboard-metrics-grid'} style={styles.metricsGrid}>
-              {metrics.map((m, idx) => {
-                const Icon = m.icon;
-                return (
-                  <div key={idx} className="glass-card" style={styles.metricCard}>
-                    <div style={styles.metricHeader}>
-                      <span style={styles.metricLabel}>
-                        {m.label}
-                        {m.provenance && renderProvenanceBadge(m.provenance as any)}
-                      </span>
-                      <div style={styles.metricIconWrap}>
-                        <Icon size={16} color="var(--accent-primary)" />
-                      </div>
-                    </div>
-                    <div style={styles.metricBody}>
-                      <span style={styles.metricValue}>{m.value}</span>
-                      <span style={{
-                        ...styles.metricChange,
-                        color: m.positive ? 'var(--accent-green)' : 'var(--accent-red)'
-                      }}>
-                        {m.change.startsWith('+') || m.change.startsWith('-') ? (
-                          m.positive ? <ArrowUpRight size={14} style={{ marginRight: 2 }} /> : <ArrowDownRight size={14} style={{ marginRight: 2 }} />
-                        ) : null}
-                        {m.change}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Chart Card */}
-            <div className="glass-card" style={styles.chartCard}>
-              <div className={'dashboard-chart-header'} style={styles.chartHeader}>
-                <div>
-                  <h2 style={styles.cardTitle}>Performance Overview {renderProvenanceBadge('observed')}</h2>
-                  <p style={styles.cardSubtitle}>Organic traffic trends and daily impressions</p>
-                </div>
-                <div style={styles.chartPeriod}>
-                  <button style={styles.periodBtnActive}>Last 30 Days</button>
-                  <button style={styles.periodBtn}>Last 90 Days</button>
-                </div>
-              </div>
-              
-              {/* Custom SVG Line Chart */}
-              <div ref={containerRef} style={styles.chartWrapper}>
-                {chartWidth !== null && (
-                  <svg viewBox={`0 0 ${chartWidth} 240`} style={styles.chartSvg}>
-                    <defs>
-                      <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--accent-primary)" stopOpacity="0.25" />
-                        <stop offset="100%" stopColor="var(--accent-primary)" stopOpacity="0.0" />
-                      </linearGradient>
-                      <linearGradient id="purpleGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="var(--accent-secondary)" stopOpacity="0.2" />
-                        <stop offset="100%" stopColor="var(--accent-secondary)" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-                    {/* Grid Lines */}
-                    <line x1={x0} y1="20" x2={x5} y2="20" stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" />
-                    <line x1={x0} y1="75" x2={x5} y2="75" stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" />
-                    <line x1={x0} y1="130" x2={x5} y2="130" stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" />
-                    <line x1={x0} y1="185" x2={x5} y2="185" stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" />
-                    
-                    {/* Fill Curves */}
-                    <path
-                      d={`M ${x0} 185 Q ${ctrlX1} 170 ${x1} 110 T ${x2} 90 T ${x3} 140 T ${x4} 60 T ${x5} 30 L ${x5} 200 L ${x0} 200 Z`}
-                      fill="url(#chartGradient)"
-                    />
-                    <path
-                      d={`M ${x0} 185 Q ${ctrlX1} 150 ${x1} 130 T ${x2} 110 T ${x3} 160 T ${x4} 90 T ${x5} 50 L ${x5} 200 L ${x0} 200 Z`}
-                      fill="url(#purpleGradient)"
-                    />
-
-                    {/* Line Curves */}
-                    <path
-                      d={`M ${x0} 185 Q ${ctrlX1} 170 ${x1} 110 T ${x2} 90 T ${x3} 140 T ${x4} 60 T ${x5} 30`}
-                      fill="none"
-                      stroke="var(--accent-primary)"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d={`M ${x0} 185 Q ${ctrlX1} 150 ${x1} 130 T ${x2} 110 T ${x3} 160 T ${x4} 90 T ${x5} 50`}
-                      fill="none"
-                      stroke="var(--accent-secondary)"
-                      strokeWidth="2"
-                      strokeDasharray="4 4"
-                      strokeLinecap="round"
-                    />
-
-                    {/* Data points */}
-                    <circle cx={x4} cy="60" r="5" fill="var(--accent-primary)" stroke="var(--bg-primary)" strokeWidth="2" />
-                    <circle cx={x5} cy="30" r="5" fill="var(--accent-primary)" stroke="var(--bg-primary)" strokeWidth="2" />
-                  </svg>
-                )}
-              </div>
-              
-              <div style={styles.chartLegends}>
-                <div style={styles.legendItem}>
-                  <div style={{ ...styles.legendDot, background: 'var(--accent-primary)' }} />
-                  <span>Clicks (Search Console)</span>
-                </div>
-                <div style={styles.legendItem}>
-                  <div style={{ ...styles.legendDot, border: '1px dashed var(--accent-secondary)', background: 'transparent' }} />
-                  <span>Impressions</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Details Section */}
-            <div style={styles.detailsGrid}>
-              {/* GSC Keywords Table */}
-              <div className="glass-card" style={styles.keywordsCard}>
-                <div style={styles.cardHeader}>
-                  <h2 style={styles.cardTitle}>Top Keywords (GSC)</h2>
-                  <p style={styles.cardSubtitle}>Queries driving the most traffic</p>
-                </div>
-                <div style={styles.tableWrapper}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr style={styles.trHead}>
-                        <th style={styles.th}>Keyword Query</th>
-                        <th style={styles.th}>Clicks</th>
-                        <th style={styles.th}>Impressions</th>
-                        <th style={styles.th}>CTR</th>
-                        <th style={styles.th}>Position</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {keywords.map((k, idx) => (
-                        <tr key={idx} style={styles.trBody}>
-                          <td style={styles.tdKeyword}>{k.query}</td>
-                          <td style={styles.td}>{k.clicks.toLocaleString()}</td>
-                          <td style={styles.td}>{k.impressions.toLocaleString()}</td>
-                          <td style={styles.td}>{k.ctr}</td>
-                          <td style={styles.td}>
-                            <span style={styles.badgePosition}>{k.pos}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Action Center / Recommendations */}
-              <div className="glass-card" style={styles.actionsCard}>
-                <div style={styles.cardHeader}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                    <div>
-                      <h2 style={styles.cardTitle}>Action Center</h2>
-                      <p style={styles.cardSubtitle}>AI generated SEO recommendations</p>
-                    </div>
-                    {apiLoading && <span style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', animation: 'pulse 1.5s infinite' }}>Connecting API...</span>}
-                    {apiError && <span style={{ fontSize: '0.75rem', color: 'var(--accent-red)' }} title={apiError}>Offline Mode (Mock)</span>}
-                  </div>
-                </div>
-                <div style={styles.actionList}>
-                  {displayRecs.map((act) => {
-                    const isCompleted = act.status === 'completed';
-                    const pri = getPriorityDetails(act.priority);
-                    const indicatorColor = isCompleted ? 'var(--accent-secondary)' : pri.color;
-                    
-                    return (
-                      <div 
-                        key={act.id} 
-                        style={{ 
-                          ...styles.actionItem, 
-                          ...(isCompleted ? { opacity: 0.55 } : {}) 
-                        }}
-                      >
-                        <div style={{ ...styles.actionLeftIndicator, background: indicatorColor }} />
-                        <div style={styles.actionBody}>
-                          <div style={styles.actionHeaderRow}>
-                            <span 
-                              style={{ 
-                                ...styles.actionTitle, 
-                                ...(isCompleted ? { textDecoration: 'line-through', color: 'var(--text-muted)' } : {}) 
-                              }}
-                            >
-                              {act.title}
-                            </span>
-                            <span style={{ ...styles.badgeImpact, color: indicatorColor, borderColor: indicatorColor }}>
-                              {isCompleted ? 'Done' : `${act.impactScore || 0} Impact`}
-                            </span>
-                          </div>
-                          <p style={{ ...styles.actionDesc, ...(isCompleted ? { color: 'var(--text-muted)' } : {}) }}>
-                            {act.description}
-                          </p>
-                          <div style={styles.actionFooterRow}>
-                            <span style={styles.actionTypeTag}>{isCompleted ? 'Resolved' : `${act.priority.toUpperCase()}`}</span>
-                            <button 
-                              onClick={() => {
-                                setSelectedRecForDetail(act);
-                                setRecAssigneeId(act.assigneeId || '');
-                                setRecInternalNotes(act.internalNotes || '');
-                                setRecClientNotes(act.clientNotes || '');
-                              }}
-                              style={{ 
-                                ...styles.actionBtnOptimize, 
-                                color: indicatorColor,
-                                fontWeight: isCompleted ? 500 : 600
-                              }}
-                            >
-                              <span>{isCompleted ? 'Xem Chi Tiết' : 'Optimize / Phân công'}</span>
-                              <ChevronRight size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </>
+          <DashboardTab
+            metrics={mappedMetrics}
+            keywords={gscPerformance?.topKeywords || []}
+            chartData={gscPerformance?.chartData || []}
+            containerRef={containerRef}
+            chartWidth={chartWidth}
+            displayRecs={displayRecs}
+            apiLoading={apiLoading || loadingGsc}
+            apiError={apiError}
+            setSelectedRecForDetail={setSelectedRecForDetail}
+            setRecAssigneeId={setRecAssigneeId}
+            setRecInternalNotes={setRecInternalNotes}
+            setRecClientNotes={setRecClientNotes}
+          />
         )}
 
         {/* Content Marketing Tab */}
         {activeTab === 'content' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
-            {/* Sub-tab Switcher */}
-            <div style={styles.subTabContainer}>
-              <button
-                onClick={() => setContentSubTab('calendar')}
-                style={{ ...styles.subTabButton, ...(contentSubTab === 'calendar' ? styles.subTabButtonActive : {}) }}
-              >
-                <Calendar size={16} />
-                <span>Editorial Calendar</span>
-              </button>
-              <button
-                onClick={() => setContentSubTab('topics')}
-                style={{ ...styles.subTabButton, ...(contentSubTab === 'topics' ? styles.subTabButtonActive : {}) }}
-              >
-                <BookOpen size={16} />
-                <span>Topical Authority Map {renderProvenanceBadge('derived')}</span>
-              </button>
-              <button
-                onClick={() => setContentSubTab('research')}
-                style={{ ...styles.subTabButton, ...(contentSubTab === 'research' ? styles.subTabButtonActive : {}) }}
-              >
-                <Search size={16} />
-                <span>Keyword Research {renderProvenanceBadge('estimated')}</span>
-              </button>
-              <button
-                onClick={() => setContentSubTab('editor')}
-                style={{ ...styles.subTabButton, ...(contentSubTab === 'editor' ? styles.subTabButtonActive : {}) }}
-              >
-                <Sparkles size={16} />
-                <span>AI SEO Writer {renderProvenanceBadge('ai')}</span>
-              </button>
-            </div>
-
-            {/* Sub-tab 1: Editorial Calendar */}
-            {contentSubTab === 'calendar' && (
-              <div style={styles.contentPlannerGrid}>
-                {/* Plans List */}
-                <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div className="glass-card" style={{ padding: '1.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                      <h3 style={{ ...styles.cardTitle, marginBottom: 0 }}>Scheduled Content Drafts</h3>
-                      <button
-                        onClick={() => {
-                          setImportUrlStr('');
-                          setImportKeyword('');
-                          setImportTopicId('');
-                          setShowImportModal(true);
-                        }}
-                        style={{
-                          padding: '0.4rem 0.8rem',
-                          background: 'linear-gradient(135deg, var(--accent-secondary), #06b6d4)',
-                          border: 'none',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          boxShadow: '0 4px 12px rgba(6,182,212,0.15)',
-                        }}
-                      >
-                        <Plus size={14} />
-                        <span>Import URL</span>
-                      </button>
-                    </div>
-
-                    {/* Decayed Content Alert Section */}
-                    {decayedPlansList.length > 0 && (
-                      <div style={{ padding: '1rem', border: '1px solid rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.03)', display: 'flex', flexDirection: 'column', gap: '0.75rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ color: 'var(--accent-red)', fontWeight: 'bold', fontSize: '0.95rem' }}>⚠️ Content Decay Alert</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>The following published articles have dropped &gt;20% in traffic over the last 30 days:</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                          {decayedPlansList.map(plan => (
-                            <div key={plan.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '6px' }}>
-                              <div>
-                                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{plan.title}</div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                  Keyword: <span style={{ color: 'var(--accent-primary)' }}>{plan.primaryKeyword}</span> | Drop: <span style={{ color: 'var(--accent-red)', fontWeight: 600 }}>-{plan.dropPercentage}%</span> (Recent clicks: {plan.recentClicks} vs Historic clicks: {plan.historicClicks})
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleRefreshContent(plan.id)}
-                                style={{
-                                  padding: '0.35rem 0.7rem',
-                                  backgroundColor: 'rgba(99, 102, 241, 0.15)',
-                                  border: '1px solid var(--accent-primary)',
-                                  borderRadius: '6px',
-                                  color: 'var(--accent-primary)',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                Refresh Content
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {contentPlansList.length === 0 ? (
-                      <div style={styles.emptyState}>
-                        <p>No content plans found. Create a new plan on the right to start your SEO strategy!</p>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {contentPlansList.map(plan => (
-                          <div key={plan.id} style={styles.planCard}>
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)' }}>{plan.title}</h4>
-                                <span style={{ ...styles.statusBadge, ...getStatusBadgeStyle(plan.status) }}>{plan.status}</span>
-                              </div>
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                                <span style={styles.keywordTagPrimary}>Primary: {plan.primaryKeyword}</span>
-                                {plan.secondaryKeywords?.map((k: string) => (
-                                  <span key={k} style={styles.keywordTagSecondary}>{k}</span>
-                                ))}
-                              </div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                Due Date: {plan.dueDate ? new Date(plan.dueDate).toLocaleDateString() : 'Unscheduled'}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => {
-                                setSelectedPlanId(plan.id);
-                                setEditorBody(plan.body || '');
-                                setContentSubTab('editor');
-                                fetchBriefForPlan(plan.id);
-                              }}
-                              style={styles.openEditorBtn}
-                            >
-                              <span>Open in Editor</span>
-                              <ChevronRight size={14} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Create Plan Form */}
-                <div style={{ flex: 1 }}>
-                  <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <h3 style={styles.cardTitle}>Plan New Content</h3>
-                    
-                    <div>
-                      <label style={styles.formLabel}>Article Title</label>
-                      <input
-                        type="text"
-                        value={newPlanTitle}
-                        onChange={e => setNewPlanTitle(e.target.value)}
-                        placeholder="e.g. Complete Guide to React SEO in 2026"
-                        style={styles.formInput}
-                      />
-                    </div>
-                    
-                    <div>
-                      <label style={styles.formLabel}>Primary Target Keyword</label>
-                      <input
-                        type="text"
-                        value={newPlanPrimaryKeyword}
-                        onChange={e => setNewPlanPrimaryKeyword(e.target.value)}
-                        placeholder="e.g. react seo guide"
-                        style={styles.formInput}
-                      />
-                    </div>
-                    
-                    <div>
-                      <label style={styles.formLabel}>Secondary Keywords (comma separated)</label>
-                      <input
-                        type="text"
-                        value={newPlanSecondaryKeywords}
-                        onChange={e => setNewPlanSecondaryKeywords(e.target.value)}
-                        placeholder="e.g. nextjs seo, react helmet"
-                        style={styles.formInput}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={styles.formLabel}>Authority Topic Group</label>
-                      <select
-                        value={newPlanTopicId}
-                        onChange={e => setNewPlanTopicId(e.target.value)}
-                        style={styles.formSelect}
-                      >
-                        <option value="">None (Independent Draft)</option>
-                        {topicsList.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={styles.formLabel}>Due Date</label>
-                      <input
-                        type="date"
-                        value={newPlanDueDate}
-                        onChange={e => setNewPlanDueDate(e.target.value)}
-                        style={styles.formInput}
-                      />
-                    </div>
-
-                    <button onClick={handleCreateContentPlan} style={styles.submitBtn}>
-                      <Plus size={16} />
-                      <span>Add to Calendar</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sub-tab 2: Topical Authority Map */}
-            {contentSubTab === 'topics' && (
-              <div style={styles.contentPlannerGrid}>
-                {/* Topic Map List */}
-                <div style={{ flex: 2 }}>
-                  <div className="glass-card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ ...styles.cardTitle, marginBottom: '1.25rem' }}>Topical Authority Structure {renderProvenanceBadge('derived')}</h3>
-                    {topicsList.length === 0 ? (
-                      <div style={styles.emptyState}>
-                        <p>No topical hubs established yet. Create parent topics on the right to build visual clusters!</p>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        {topicsList.filter(t => !t.parentId).map(parent => (
-                          <div key={parent.id} style={styles.topicClusterCard}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.6rem', marginBottom: '0.8rem' }}>
-                              <span style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--accent-primary)', fontFamily: 'var(--font-outfit)' }}>{parent.name}</span>
-                              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                {parent.keywords?.map((k: string) => (
-                                  <span key={k} style={styles.topicKeywordTag}>{k}</span>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Subtopics */}
-                            <div style={{ paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', borderLeft: '2px solid rgba(99, 102, 241, 0.15)' }}>
-                              {topicsList.filter(t => t.parentId === parent.id).length === 0 ? (
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No sub-topics created. Add one on the right with this parent selected.</span>
-                              ) : (
-                                topicsList.filter(t => t.parentId === parent.id).map(child => (
-                                  <div key={child.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                      <ChevronRight size={12} color="var(--accent-secondary)" />
-                                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{child.name}</span>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '0.3rem' }}>
-                                      {child.keywords?.map((k: string) => (
-                                        <span key={k} style={styles.topicKeywordTagSecondary}>{k}</span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Create Topic Form */}
-                <div style={{ flex: 1 }}>
-                  <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    <h3 style={styles.cardTitle}>Add Topic Entity</h3>
-                    
-                    <div>
-                      <label style={styles.formLabel}>Topic Name</label>
-                      <input
-                        type="text"
-                        value={newTopicName}
-                        onChange={e => setNewTopicName(e.target.value)}
-                        placeholder="e.g. Technical Audit"
-                        style={styles.formInput}
-                      />
-                    </div>
-                    
-                    <div>
-                      <label style={styles.formLabel}>Associated Keywords (comma separated)</label>
-                      <input
-                        type="text"
-                        value={newTopicKeywords}
-                        onChange={e => setNewTopicKeywords(e.target.value)}
-                        placeholder="e.g. core web vitals, speed"
-                        style={styles.formInput}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={styles.formLabel}>Parent Authority Group</label>
-                      <select
-                        value={newTopicParentId}
-                        onChange={e => setNewTopicParentId(e.target.value)}
-                        style={styles.formSelect}
-                      >
-                        <option value="">None (Is Parent Topic)</option>
-                        {topicsList.filter(t => !t.parentId).map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <button onClick={handleCreateTopic} style={styles.submitBtn}>
-                      <Plus size={16} />
-                      <span>Establish Topic Hub</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sub-tab 2.5: Keyword Research & Clustering */}
-            {contentSubTab === 'research' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
-                {/* Switcher for Research Sub-tabs */}
-                <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.75rem' }}>
-                  <button
-                    onClick={() => setResearchSubTab('single')}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: researchSubTab === 'single' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      fontWeight: researchSubTab === 'single' ? 600 : 500,
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      paddingBottom: '0.25rem',
-                      borderBottom: researchSubTab === 'single' ? '2px solid var(--accent-primary)' : 'none'
-                    }}
-                  >
-                    <Search size={14} />
-                    <span>Keyword Research (Single)</span>
-                  </button>
-                  <button
-                    onClick={() => setResearchSubTab('clustering')}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: researchSubTab === 'clustering' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      fontWeight: researchSubTab === 'clustering' ? 600 : 500,
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      paddingBottom: '0.25rem',
-                      borderBottom: researchSubTab === 'clustering' ? '2px solid var(--accent-primary)' : 'none'
-                    }}
-                  >
-                    <Sparkles size={14} />
-                    <span>Keyword Clustering (Bulk)</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setResearchSubTab('gap');
-                      handleFetchCompetitorGap();
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: researchSubTab === 'gap' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                      fontWeight: researchSubTab === 'gap' ? 600 : 500,
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      paddingBottom: '0.25rem',
-                      borderBottom: researchSubTab === 'gap' ? '2px solid var(--accent-primary)' : 'none'
-                    }}
-                  >
-                    <TrendingUp size={14} />
-                    <span>Competitor Gap Analysis</span>
-                  </button>
-                </div>
-
-                {/* Sub-tab A: Keyword Research (Single) */}
-                {researchSubTab === 'single' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Keyword Research (Keyword Universe)</h3>
-                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-                        Search for a target search query to check its estimated search volume, CPC, intent classification, and SERP positions.
-                      </p>
-                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                        <input
-                          type="text"
-                          value={keywordResearchInput}
-                          onChange={e => setKeywordResearchInput(e.target.value)}
-                          placeholder="Enter keyword (e.g. ai writing tools, best cloud storage)..."
-                          style={{ ...styles.formInput, flex: 1, margin: 0 }}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleResearchKeyword();
-                          }}
-                        />
-                        <button
-                          onClick={handleResearchKeyword}
-                          disabled={isResearchingKeyword}
-                          style={{
-                            background: 'var(--accent-primary)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.6rem 1.5rem',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          {isResearchingKeyword ? (
-                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                          ) : (
-                            <Search size={16} />
-                          )}
-                          <span>Research</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {keywordResearchResult && (
-                      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', alignItems: 'start' }}>
-                        {/* Keyword Metrics */}
-                        <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Metrics for &quot;{keywordResearchResult.keyword}&quot;</h4>
-                          
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
-                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Search Volume</span>
-                              <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>
-                                {keywordResearchResult.searchVolume?.toLocaleString() || '0'} /mo
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
-                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>CPC (USD)</span>
-                              <span style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.9rem' }}>
-                                ${keywordResearchResult.cpc?.toFixed(2) || '0.00'}
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '0.5rem' }}>
-                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Search Intent</span>
-                              <span style={{
-                                fontSize: '0.75rem',
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontWeight: 600,
-                                textTransform: 'capitalize',
-                                background:
-                                  keywordResearchResult.intent === 'transactional'
-                                    ? 'rgba(16, 185, 129, 0.15)'
-                                    : keywordResearchResult.intent === 'commercial'
-                                    ? 'rgba(168, 85, 247, 0.15)'
-                                    : keywordResearchResult.intent === 'navigational'
-                                    ? 'rgba(245, 158, 11, 0.15)'
-                                    : 'rgba(59, 130, 246, 0.15)',
-                                color:
-                                  keywordResearchResult.intent === 'transactional'
-                                    ? 'var(--accent-green)'
-                                    : keywordResearchResult.intent === 'commercial'
-                                    ? 'var(--accent-secondary)'
-                                    : keywordResearchResult.intent === 'navigational'
-                                    ? 'var(--accent-orange)'
-                                    : 'var(--accent-primary)'
-                              }}>
-                                {keywordResearchResult.intent || 'Informational'}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.5rem' }}>
-                            <button
-                              onClick={() => handleTrackKeywordDirectly(keywordResearchResult.keyword)}
-                              style={{
-                                background: 'rgba(255,255,255,0.05)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: 'var(--radius-sm)',
-                                padding: '0.5rem',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '0.85rem',
-                                width: '100%'
-                              }}
-                            >
-                              Track in Rank Tracker
-                            </button>
-                            <button
-                              onClick={() => {
-                                setContentSubTab('calendar');
-                                setNewPlanTitle(`Guide to ${keywordResearchResult.keyword.charAt(0).toUpperCase() + keywordResearchResult.keyword.slice(1)}`);
-                                setNewPlanPrimaryKeyword(keywordResearchResult.keyword);
-                              }}
-                              style={{
-                                background: 'var(--accent-primary)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: 'var(--radius-sm)',
-                                padding: '0.5rem',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '0.85rem',
-                                width: '100%'
-                              }}
-                            >
-                              Create Content Plan
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* SERP Results */}
-                        <div className="glass-card" style={{ padding: '1.5rem' }}>
-                          <h4 style={{ ...styles.cardTitle, fontSize: '1rem', marginBottom: '1rem' }}>Top 10 Google SERP Results</h4>
-                          
-                          {(!keywordResearchResult.results || keywordResearchResult.results.length === 0) ? (
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontStyle: 'italic' }}>No SERP records returned.</p>
-                          ) : (
-                            <div style={styles.tableWrapper}>
-                              <table style={styles.table}>
-                                <thead>
-                                  <tr style={styles.trHead}>
-                                    <th style={{ ...styles.th, width: '60px', textAlign: 'center' }}>Rank</th>
-                                    <th style={{ ...styles.th, textAlign: 'left' }}>Page Details</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {keywordResearchResult.results.map((r: any) => (
-                                    <tr key={r.rank} style={styles.trBody}>
-                                      <td style={{ ...styles.td, textAlign: 'center', fontWeight: 600, color: 'var(--accent-primary)' }}>
-                                        #{r.rank}
-                                      </td>
-                                      <td style={{ ...styles.td, textAlign: 'left' }}>
-                                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>{r.title}</div>
-                                        <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-secondary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', marginTop: '0.2rem' }}>
-                                          <span>{r.url}</span>
-                                          <ExternalLink size={10} />
-                                        </a>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Sub-tab B: Keyword Clustering */}
-                {researchSubTab === 'clustering' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Keyword Clustering (Hub Builder)</h3>
-                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-                        Input multiple search terms (one per line) to group them into clusters based on SERP overlap. Establish these groups directly as topical hubs.
-                      </p>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        <textarea
-                          rows={6}
-                          value={keywordClusteringInput}
-                          onChange={e => setKeywordClusteringInput(e.target.value)}
-                          placeholder="Enter keywords here (e.g.&#13;ai writing tools&#13;best ai copywriter&#13;local seo tips&#13;google ranking guide)..."
-                          style={{
-                            ...styles.formInput,
-                            width: '100%',
-                            fontFamily: 'monospace',
-                            fontSize: '0.85rem',
-                            resize: 'vertical'
-                          }}
-                        />
-                        <button
-                          onClick={handleClusterKeywords}
-                          disabled={isClusteringKeywords}
-                          style={{
-                            background: 'var(--accent-primary)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.6rem 1.5rem',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.5rem',
-                            alignSelf: 'flex-start'
-                          }}
-                        >
-                          {isClusteringKeywords ? (
-                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                          ) : (
-                            <Sparkles size={16} />
-                          )}
-                          <span>Cluster Keywords</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {keywordClusteringResult.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        <h4 style={{ ...styles.cardTitle, fontSize: '1rem' }}>Clustered Topic Suggestions</h4>
-                        
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-                          {keywordClusteringResult.map((cluster: any, idx: number) => (
-                            <div key={idx} className="glass-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                              <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                                  <h5 style={{ ...styles.cardTitle, fontSize: '0.95rem', margin: 0 }}>
-                                    Cluster: {cluster.name}
-                                  </h5>
-                                  <span style={{
-                                    fontSize: '0.7rem',
-                                    padding: '0.15rem 0.4rem',
-                                    borderRadius: '4px',
-                                    fontWeight: 600,
-                                    textTransform: 'capitalize',
-                                    background: 'rgba(168, 85, 247, 0.15)',
-                                    color: 'var(--accent-secondary)'
-                                  }}>
-                                    {cluster.intent || 'Commercial'}
-                                  </span>
-                                </div>
-
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1rem' }}>
-                                  {cluster.keywords?.map((kw: string, kwIdx: number) => (
-                                    <span key={kwIdx} style={{
-                                      fontSize: '0.75rem',
-                                      padding: '0.15rem 0.4rem',
-                                      background: 'rgba(255,255,255,0.04)',
-                                      border: '1px solid rgba(255,255,255,0.08)',
-                                      borderRadius: '4px',
-                                      color: 'var(--text-primary)'
-                                    }}>
-                                      {kw}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-
-                              <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto' }}>
-                                <button
-                                  onClick={() => handleCreateTopicFromCluster(cluster.name, cluster.keywords)}
-                                  style={{
-                                    flex: 1,
-                                    background: 'rgba(99, 102, 241, 0.15)',
-                                    color: 'var(--accent-primary)',
-                                    border: '1px solid rgba(99, 102, 241, 0.3)',
-                                    borderRadius: 'var(--radius-sm)',
-                                    padding: '0.4rem 0.75rem',
-                                    cursor: 'pointer',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem'
-                                  }}
-                                >
-                                  Establish Topic Hub
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Sub-tab C: Competitor Content Gap */}
-                {researchSubTab === 'gap' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                        <div>
-                          <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Competitor Content Gap Analysis</h3>
-                          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                            Find keywords where your competitors rank in the top 10 positions, but your project is ranking poorly (&gt; 10) or not ranking at all.
-                          </p>
-                        </div>
-                        <button
-                          onClick={handleFetchCompetitorGap}
-                          disabled={isLoadingCompetitorGap}
-                          style={{
-                            background: 'var(--accent-primary)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.6rem 1.5rem',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          {isLoadingCompetitorGap ? (
-                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                          ) : (
-                            <RefreshCw size={16} />
-                          )}
-                          <span>Run Analysis</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <h4 style={{ ...styles.cardTitle, fontSize: '1rem', marginBottom: '1.25rem' }}>Content Gap Opportunities</h4>
-                      
-                      {isLoadingCompetitorGap ? (
-                        <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
-                          <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
-                        </div>
-                      ) : competitorGapResult.length === 0 ? (
-                        <div style={styles.emptyState}>
-                          <p>No content gaps detected. Click &quot;Run Analysis&quot; to query competitor data from ClickHouse.</p>
-                        </div>
-                      ) : (
-                        <div style={styles.tableWrapper}>
-                          <table style={styles.table}>
-                            <thead>
-                              <tr style={styles.trHead}>
-                                <th style={{ ...styles.th, textAlign: 'left' }}>Target Keyword</th>
-                                <th style={{ ...styles.th, textAlign: 'left' }}>Competitor Domain</th>
-                                <th style={{ ...styles.th, textAlign: 'center' }}>Competitor Rank</th>
-                                <th style={{ ...styles.th, textAlign: 'center' }}>Our Rank</th>
-                                <th style={{ ...styles.th, textAlign: 'center' }}>Action</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {competitorGapResult.map((item: any, idx: number) => (
-                                <tr key={idx} style={styles.trBody}>
-                                  <td style={{ ...styles.tdKeyword, textAlign: 'left' }}>{item.keyword}</td>
-                                  <td style={{ ...styles.td, textAlign: 'left', color: 'var(--text-secondary)' }}>{item.competitorDomain}</td>
-                                  <td style={{ ...styles.td, textAlign: 'center' }}>
-                                    <span style={{
-                                      background: 'rgba(245, 158, 11, 0.12)',
-                                      color: 'var(--accent-orange)',
-                                      fontWeight: 600,
-                                      padding: '0.15rem 0.4rem',
-                                      borderRadius: '4px',
-                                      fontSize: '0.8rem'
-                                    }}>
-                                      #{item.competitorRank}
-                                    </span>
-                                  </td>
-                                  <td style={{ ...styles.td, textAlign: 'center', color: 'var(--text-muted)' }}>
-                                    {item.ownRank ? `#${item.ownRank}` : 'Unranked'}
-                                  </td>
-                                  <td style={{ ...styles.td, textAlign: 'center' }}>
-                                    <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center' }}>
-                                      <button
-                                        onClick={() => handleTrackKeywordDirectly(item.keyword)}
-                                        style={{
-                                          background: 'rgba(255,255,255,0.04)',
-                                          border: '1px solid rgba(255,255,255,0.08)',
-                                          color: 'var(--text-primary)',
-                                          borderRadius: 'var(--radius-sm)',
-                                          padding: '0.3rem 0.6rem',
-                                          fontSize: '0.75rem',
-                                          fontWeight: 500,
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        Track
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setContentSubTab('calendar');
-                                          setNewPlanTitle(`Guide to ${item.keyword.charAt(0).toUpperCase() + item.keyword.slice(1)}`);
-                                          setNewPlanPrimaryKeyword(item.keyword);
-                                        }}
-                                        style={{
-                                          background: 'var(--accent-primary)',
-                                          color: 'white',
-                                          border: 'none',
-                                          borderRadius: 'var(--radius-sm)',
-                                          padding: '0.3rem 0.6rem',
-                                          fontSize: '0.75rem',
-                                          fontWeight: 600,
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        Plan Article
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Sub-tab 3: AI SEO Editor & Real-time Optimizer */}
-            {contentSubTab === 'editor' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%' }}>
-                {/* Selector Header if no plan chosen */}
-                {!selectedPlanId ? (
-                  <div className="glass-card" style={{ padding: '2rem', textAlign: 'center' }}>
-                    <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Select a Content Draft to Write</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-                      Choose one of your scheduled content pieces from the list below to begin optimizing.
-                    </p>
-                    <select
-                      value={selectedPlanId || ''}
-                      onChange={e => {
-                        setSelectedPlanId(e.target.value);
-                        const plan = contentPlansList.find(p => p.id === e.target.value);
-                        setEditorBody(plan ? plan.body || '' : '');
-                        if (e.target.value) fetchBriefForPlan(e.target.value);
-                      }}
-                      style={{ ...styles.formSelect, maxWidth: '400px', margin: '0 auto' }}
-                    >
-                      <option value="">-- Choose Content Plan --</option>
-                      {contentPlansList.map(p => (
-                        <option key={p.id} value={p.id}>{p.title}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  // Workspace is Active
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {/* Back header bar */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <button
-                          onClick={() => setSelectedPlanId(null)}
-                          style={{ ...styles.openEditorBtn, background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}
-                        >
-                          <ArrowLeft size={14} />
-                          <span>Select different draft</span>
-                        </button>
-                        <h3 style={{ ...styles.cardTitle, margin: 0 }}>{currentPlan?.title}</h3>
-                      </div>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        {currentPlan?.status === 'published' ? (
-                          <>
-                            {currentPlan.publishUrl && (
-                              <a
-                                href={currentPlan.publishUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  fontSize: '0.8rem',
-                                  color: 'var(--accent-green)',
-                                  textDecoration: 'none',
-                                  background: 'rgba(16,185,129,0.1)',
-                                  padding: '0.4rem 0.8rem',
-                                  borderRadius: '6px',
-                                  fontWeight: 600,
-                                  border: '1px solid rgba(16,185,129,0.2)',
-                                }}
-                              >
-                                <Globe size={14} />
-                                <span>Live URL</span>
-                              </a>
-                            )}
-                            <button
-                              onClick={() => handleRefreshContent(currentPlan.id)}
-                              style={{
-                                padding: '0.4rem 0.8rem',
-                                background: 'rgba(239, 68, 68, 0.1)',
-                                border: '1px solid rgba(239, 68, 68, 0.25)',
-                                borderRadius: '6px',
-                                color: 'var(--accent-red)',
-                                fontSize: '0.8rem',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.25rem',
-                              }}
-                            >
-                              <RefreshCw size={14} />
-                              <span>Re-optimize</span>
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              if (currentPlan) {
-                                setPublishingPlanId(currentPlan.id);
-                                setPublishUrlStr('');
-                                setShowPublishModal(true);
-                              }
-                            }}
-                            style={{
-                              padding: '0.4rem 0.8rem',
-                              background: 'linear-gradient(135deg, var(--accent-secondary), #06b6d4)',
-                              border: 'none',
-                              borderRadius: '6px',
-                              color: '#fff',
-                              fontSize: '0.8rem',
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                              boxShadow: '0 4px 12px rgba(6,182,212,0.15)',
-                            }}
-                          >
-                            <Globe size={14} />
-                            <span>Publish Live</span>
-                          </button>
-                        )}
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                          Target: <strong style={{ color: 'var(--text-primary)' }}>{currentPlan?.primaryKeyword}</strong>
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* ClickHouse GSC Performance Stats Card Dashboard */}
-                    {currentPlan?.status === 'published' && (
-                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', width: '100%' }}>
-                        {/* Clicks */}
-                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>30d Clicks (GSC)</span>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              {performanceData?.recent?.clicks ?? 0}
-                            </span>
-                            {performanceData?.hasData && (
-                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: (performanceData.recent.clicks >= performanceData.historic.clicks) ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                                {performanceData.recent.clicks >= performanceData.historic.clicks ? '▲' : '▼'}{' '}
-                                {Math.abs(performanceData.recent.clicks - performanceData.historic.clicks)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Impressions */}
-                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>30d Impressions</span>
-                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-                            <span style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              {performanceData?.recent?.impressions ?? 0}
-                            </span>
-                            {performanceData?.hasData && (
-                              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: (performanceData.recent.impressions >= performanceData.historic.impressions) ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                                {performanceData.recent.impressions >= performanceData.historic.impressions ? '▲' : '▼'}{' '}
-                                {Math.abs(performanceData.recent.impressions - performanceData.historic.impressions)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* CTR */}
-                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Average CTR</span>
-                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                            {performanceData?.recent?.ctr ? `${(performanceData.recent.ctr * 100).toFixed(2)}%` : '0.00%'}
-                          </div>
-                        </div>
-
-                        {/* Position */}
-                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Average Position</span>
-                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                            {performanceData?.recent?.position ? performanceData.recent.position.toFixed(1) : '0.0'}
-                          </div>
-                        </div>
-
-                        {/* Primary Rank */}
-                        <div className="glass-card" style={{ flex: 1, minWidth: '150px', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Keyword Rank</span>
-                          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                            {performanceData?.primaryKeywordRank ? `#${performanceData.primaryKeywordRank}` : 'Not Ranked'}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Active work deck */}
-                    <div style={styles.editorWorkspaceGrid}>
-                      {/* Left: AI SEO Brief */}
-                      <div style={styles.editorColBrief}>
-                        <div className="glass-card" style={{ padding: '1.25rem', height: '100%', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                          <h3 style={styles.cardTitle}>AI Content Brief {renderProvenanceBadge('ai')}</h3>
-                          
-                          {!brief ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '2rem 1rem', textAlign: 'center' }}>
-                              <FileText size={32} color="var(--text-muted)" />
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>No AI Content Brief has been created for this topic yet.</p>
-                              <button
-                                onClick={handleGenerateBrief}
-                                disabled={isGeneratingBrief}
-                                style={styles.submitBtn}
-                              >
-                                {isGeneratingBrief ? (
-                                  <>
-                                    <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                                    <span>Generating Brief...</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Sparkles size={14} />
-                                    <span>Generate AI Brief</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto', flex: 1 }}>
-                              {/* Word Count Indicator */}
-                              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Suggested Word Count {renderProvenanceBadge('estimated')}</span>
-                                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--accent-secondary)', marginTop: '0.1rem' }}>
-                                    {brief.targetWordCount}+ words
-                                </div>
-                              </div>
-
-                              {/* Target Headings */}
-                              <div>
-                                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>AI Outline Structure {renderProvenanceBadge('ai')}</h4>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                  {brief.outline?.map((item: any, idx: number) => {
-                                    let isH2 = false;
-                                    let isH3 = false;
-                                    let cleanText = '';
-                                    let cleanTag = 'H1';
-
-                                    if (typeof item === 'object' && item !== null) {
-                                      const lvl = (item.level || '').toLowerCase();
-                                      isH2 = lvl === 'h2';
-                                      isH3 = lvl === 'h3';
-                                      cleanText = item.heading || '';
-                                      cleanTag = lvl.toUpperCase() || 'H1';
-                                    } else if (typeof item === 'string') {
-                                      isH2 = item.toLowerCase().startsWith('h2:');
-                                      isH3 = item.toLowerCase().startsWith('h3:');
-                                      cleanText = item.replace(/^[hH][23]:\s*/, '');
-                                      cleanTag = isH2 ? 'H2' : isH3 ? 'H3' : 'H1';
-                                    } else {
-                                      return null;
-                                    }
-                                    
-                                    return (
-                                      <div key={idx} style={{ 
-                                        display: 'flex', 
-                                        alignItems: 'baseline', 
-                                        gap: '0.4rem', 
-                                        paddingLeft: isH3 ? '1rem' : '0px',
-                                        fontSize: '0.8rem'
-                                      }}>
-                                        <span style={{ 
-                                          fontSize: '0.65rem', 
-                                          fontWeight: 700, 
-                                          background: isH2 ? 'rgba(99,102,241,0.1)' : 'rgba(168,85,247,0.1)', 
-                                          color: isH2 ? 'var(--accent-primary)' : 'var(--accent-secondary)',
-                                          padding: '0.05rem 0.25rem',
-                                          borderRadius: '3px'
-                                        }}>{cleanTag}</span>
-                                        <span style={{ color: 'var(--text-secondary)' }}>{cleanText}</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Competitor Strategy */}
-                              <div>
-                                <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Competitor Analysis</h4>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                  {brief.competitorOutlines?.map((comp: any, idx: number) => (
-                                    <div key={idx} style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.01)', borderRadius: '4px', borderLeft: '2px solid rgba(255,255,255,0.1)' }}>
-                                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.15rem' }}>{comp.domain || `Competitor ${idx+1}`}</div>
-                                      <div>Headings found: {comp.headingsCount || 0} (Word count: ~{comp.avgWordCount || 1800})</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Center: Live Editor */}
-                      <div style={styles.editorColMain}>
-                        <div className="glass-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 style={styles.cardTitle}>Editor Draft</h3>
-                            {isOptimizing && (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--accent-secondary)' }}>
-                                <RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} />
-                                <span>Analyzing SEO...</span>
-                              </div>
-                            )}
-                          </div>
-                          
-                          <textarea
-                            value={editorBody}
-                            onChange={e => setEditorBody(e.target.value)}
-                            placeholder="# Write your Markdown article here...&#10;&#10;Use headings matching the AI brief and sprinkle keywords naturally."
-                            style={styles.editorTextArea}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Right: SEO Score & Recommendations */}
-                      <div style={styles.editorColSidebar}>
-                        <div className="glass-card" style={{ padding: '1.25rem', height: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                          <h3 style={styles.cardTitle}>SEO Scorecard</h3>
-                          
-                          {/* Radial Progress Score */}
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', padding: '1rem 0' }}>
-                            <div style={{
-                              width: '100px',
-                              height: '100px',
-                              borderRadius: '50%',
-                              background: `conic-gradient(${
-                                (optimizationResult?.score || 0) > 70 ? 'var(--accent-green)' : (optimizationResult?.score || 0) > 45 ? 'var(--accent-orange)' : 'var(--accent-red)'
-                              } ${(optimizationResult?.score || 0) * 3.6}deg, rgba(255,255,255,0.03) 0deg)`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              boxShadow: 'inset 0 0 15px rgba(0,0,0,0.5), 0 0 20px rgba(99,102,241,0.05)',
-                              position: 'relative'
-                            }}>
-                              {/* Inner mask */}
-                              <div style={{
-                                width: '82px',
-                                height: '82px',
-                                borderRadius: '50%',
-                                backgroundColor: '#0a0d16',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}>
-                                <span style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                  {optimizationResult?.score || 0}
-                                </span>
-                                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                  SEO Grade
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Stats Grid */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '0.4rem' }}>
-                              <span style={{ color: 'var(--text-secondary)' }}>Word Count:</span>
-                              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                {optimizationResult?.word_count || 0} / {brief?.targetWordCount || 1000}
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '0.4rem' }}>
-                              <span style={{ color: 'var(--text-secondary)' }}>Keyword Density:</span>
-                              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                {optimizationResult?.primary_keyword_density?.toFixed(2) || '0.00'}%
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Actionable Suggestions */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', flex: 1 }}>
-                            <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>Optimization Checklist</h4>
-                            
-                            {!optimizationResult || optimizationResult.suggestions?.length === 0 ? (
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                Start writing to view specific recommendations.
-                              </span>
-                            ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                {optimizationResult.suggestions.map((sug: string, idx: number) => {
-                                  const isPerfect = sug.includes('✓') || sug.includes('Perfect');
-                                  
-                                  return (
-                                    <div key={idx} style={styles.suggestionItem}>
-                                      {isPerfect ? (
-                                        <CheckCircle2 size={12} color="var(--accent-green)" style={{ marginTop: '2px', flexShrink: 0 }} />
-                                      ) : (
-                                        <AlertCircle size={12} color="var(--accent-orange)" style={{ marginTop: '2px', flexShrink: 0 }} />
-                                      )}
-                                      <span style={{ color: isPerfect ? 'var(--text-muted)' : 'var(--text-secondary)' }}>{sug}</span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Internal Link Suggestions */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                              <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <Link2 size={12} color="var(--accent-primary)" />
-                                <span>Internal Link Builder</span>
-                              </h4>
-                              <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.3 }}>
-                                Improve topical authority by linking to these relevant published pages:
-                              </p>
-                              {getInternalLinkSuggestions().length === 0 ? (
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                  No published pages in this topic hub yet.
-                                </span>
-                              ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                  {getInternalLinkSuggestions().map((link, idx) => (
-                                    <div key={idx} style={{ padding: '0.5rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.04)', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '180px' }} title={link.title}>
-                                          {link.title}
-                                        </span>
-                                        <span style={{ fontSize: '0.65rem', color: 'var(--accent-secondary)', background: 'rgba(6,182,212,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontWeight: 600 }}>
-                                          {link.reason}
-                                        </span>
-                                      </div>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem' }}>
-                                        <span style={{ color: 'var(--text-muted)' }}>Anchor: &quot;{link.keyword}&quot;</span>
-                                        <a href={link.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'none', fontWeight: 600 }}>
-                                          Copy Link
-                                        </a>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          <ContentPlannerTab
+            token={token}
+            workspaceId={workspaceId}
+            projectId={projectId}
+            activeSite={activeSite}
+            selectedSite={selectedSite}
+            topicsList={topicsList}
+            contentPlansList={contentPlansList}
+            decayedPlansList={decayedPlansList}
+            selectedPlanId={selectedPlanId}
+            setSelectedPlanId={setSelectedPlanId}
+            editorBody={editorBody}
+            setEditorBody={setEditorBody}
+            contentSubTab={contentSubTab}
+            setContentSubTab={setContentSubTab}
+            researchSubTab={researchSubTab}
+            setResearchSubTab={setResearchSubTab}
+            keywordResearchInput={keywordResearchInput}
+            setKeywordResearchInput={setKeywordResearchInput}
+            keywordResearchResult={keywordResearchResult}
+            isResearchingKeyword={isResearchingKeyword}
+            keywordClusteringInput={keywordClusteringInput}
+            setKeywordClusteringInput={setKeywordClusteringInput}
+            keywordClusteringResult={keywordClusteringResult}
+            isClusteringKeywords={isClusteringKeywords}
+            competitorGapResult={competitorGapResult}
+            isLoadingCompetitorGap={isLoadingCompetitorGap}
+            newTopicName={newTopicName}
+            setNewTopicName={setNewTopicName}
+            newTopicParentId={newTopicParentId}
+            setNewTopicParentId={setNewTopicParentId}
+            newTopicKeywords={newTopicKeywords}
+            setNewTopicKeywords={setNewTopicKeywords}
+            newPlanTitle={newPlanTitle}
+            setNewPlanTitle={setNewPlanTitle}
+            newPlanPrimaryKeyword={newPlanPrimaryKeyword}
+            setNewPlanPrimaryKeyword={setNewPlanPrimaryKeyword}
+            newPlanSecondaryKeywords={newPlanSecondaryKeywords}
+            setNewPlanSecondaryKeywords={setNewPlanSecondaryKeywords}
+            newPlanTopicId={newPlanTopicId}
+            setNewPlanTopicId={setNewPlanTopicId}
+            newPlanDueDate={newPlanDueDate}
+            setNewPlanDueDate={setNewPlanDueDate}
+            brief={brief}
+            isGeneratingBrief={isGeneratingBrief}
+            optimizationResult={optimizationResult}
+            isOptimizing={isOptimizing}
+            performanceData={performanceData}
+            setShowImportModal={setShowImportModal}
+            setImportUrlStr={setImportUrlStr}
+            setImportKeyword={setImportKeyword}
+            setImportTopicId={setImportTopicId}
+            setShowPublishModal={setShowPublishModal}
+            setPublishingPlanId={setPublishingPlanId}
+            setPublishUrlStr={setPublishUrlStr}
+            handleRefreshContent={handleRefreshContent}
+            fetchBriefForPlan={fetchBriefForPlan}
+            handleCreateContentPlan={handleCreateContentPlan}
+            handleCreateTopic={handleCreateTopic}
+            handleResearchKeyword={handleResearchKeyword}
+            handleTrackKeywordDirectly={handleTrackKeywordDirectly}
+            handleClusterKeywords={handleClusterKeywords}
+            handleCreateTopicFromCluster={handleCreateTopicFromCluster}
+            handleFetchCompetitorGap={handleFetchCompetitorGap}
+            handleGenerateBrief={handleGenerateBrief}
+          />
         )}
 
         {/* Site Audit Tab */}
         {activeTab === 'audit' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
-            {/* Header / Trigger Audit */}
-            <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-              <div>
-                <h2 style={styles.cardTitle}>Kiểm tra Tối ưu Kỹ thuật (Technical SEO Audit)</h2>
-                <p style={styles.cardSubtitle}>
-                  Chạy trình thu thập và phát hiện các lỗi technical SEO trên website <strong style={{ color: 'var(--accent-primary)' }}>{selectedSite}</strong>
-                </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                {isCrawling && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-secondary)' }}>
-                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                    <span>{crawlStatusText || 'Đang quét website...'}</span>
-                  </div>
-                )}
-                <button
-                  onClick={handleTriggerCrawl}
-                  disabled={isCrawling || !activeSite}
-                  className="shine-button"
-                  style={{
-                    ...styles.submitBtn,
-                    marginTop: 0,
-                    opacity: (isCrawling || !activeSite) ? 0.6 : 1,
-                    cursor: (isCrawling || !activeSite) ? 'not-allowed' : 'pointer',
-                    background: 'var(--accent-primary)',
-                    padding: '0.6rem 1.2rem',
-                  }}
-                >
-                  <Search size={16} />
-                  <span>{isCrawling ? 'Đang thực hiện...' : 'Kích hoạt Audit'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Health & Crawl Metrics */}
-            <div style={styles.metricsGrid}>
-              <div className="glass-card" style={styles.metricCard}>
-                <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Điểm Sức Khỏe (Health Score) {renderProvenanceBadge('derived')}</span>
-                  <div style={styles.metricIconWrap}>
-                    <Activity size={16} color="var(--accent-green)" />
-                  </div>
-                </div>
-                <div style={styles.metricBody}>
-                  <span style={styles.metricValue}>
-                    {recs.length === 0 ? '98%' : `${Math.max(50, 100 - recs.filter(r => r.status !== 'completed').length * 6)}%`}
-                  </span>
-                  <span style={{ ...styles.metricChange, color: 'var(--accent-green)' }}>
-                    Ổn định
-                  </span>
-                </div>
-              </div>
-
-              <div className="glass-card" style={styles.metricCard}>
-                <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Đã Quét (Pages Crawled) {renderProvenanceBadge('observed')}</span>
-                  <div style={styles.metricIconWrap}>
-                    <Globe size={16} color="var(--accent-primary)" />
-                  </div>
-                </div>
-                <div style={styles.metricBody}>
-                  <span style={styles.metricValue}>12 / 100</span>
-                  <span style={{ ...styles.metricChange, color: 'var(--text-muted)' }}>
-                    Trang hoạt động
-                  </span>
-                </div>
-              </div>
-
-              <div className="glass-card" style={styles.metricCard}>
-                <div style={styles.metricHeader}>
-                  <span style={styles.metricLabel}>Số Lỗi Phát Hiện (Issues) {renderProvenanceBadge('derived')}</span>
-                  <div style={styles.metricIconWrap}>
-                    <AlertCircle size={16} color="var(--accent-orange)" />
-                  </div>
-                </div>
-                <div style={styles.metricBody}>
-                  <span style={styles.metricValue}>
-                    {recs.filter(r => r.status !== 'completed').length} Lỗi
-                  </span>
-                  <span style={{ ...styles.metricChange, color: 'var(--accent-orange)' }}>
-                    Cần tối ưu
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Audit Issues Details */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
-                <h3 style={styles.cardTitle}>Danh sách Lỗi Technical SEO & Kiến nghị {renderProvenanceBadge('derived')}</h3>
-                <p style={styles.cardSubtitle}>Được sắp xếp theo độ ưu tiên và ảnh hưởng tới SEO</p>
-              </div>
-
-              {recs.length === 0 ? (
-                <div style={styles.emptyState}>
-                  <p>Không phát hiện lỗi technical nào trên website của bạn. Website của bạn hoàn toàn tối ưu!</p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {recs.map((act) => {
-                    const isCompleted = act.status === 'completed';
-                    const pri = getPriorityDetails(act.priority);
-                    const indicatorColor = isCompleted ? 'var(--accent-secondary)' : pri.color;
-                    
-                    return (
-                      <div 
-                        key={act.id} 
-                        style={{ 
-                          ...styles.actionItem, 
-                          ...(isCompleted ? { opacity: 0.55 } : {}),
-                          display: 'flex',
-                          background: 'rgba(255, 255, 255, 0.01)',
-                          border: '1px solid rgba(255, 255, 255, 0.04)',
-                          borderRadius: 'var(--radius-sm)',
-                          overflow: 'hidden'
-                        }}
-                      >
-                        <div style={{ ...styles.actionLeftIndicator, width: '4px', background: indicatorColor }} />
-                        <div style={{ ...styles.actionBody, padding: '1rem', flex: 1 }}>
-                          <div style={{ ...styles.actionHeaderRow, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <span 
-                              style={{ 
-                                ...styles.actionTitle, 
-                                fontSize: '0.95rem',
-                                fontWeight: 600,
-                                ...(isCompleted ? { textDecoration: 'line-through', color: 'var(--text-muted)' } : { color: 'var(--text-primary)' }) 
-                              }}
-                            >
-                              {act.title}
-                            </span>
-                            <span style={{ ...styles.badgeImpact, fontSize: '0.75rem', padding: '0.1rem 0.4rem', border: '1px solid', borderRadius: '4px', color: indicatorColor, borderColor: indicatorColor }}>
-                              {isCompleted ? 'Hoàn thành' : `${act.impactScore || 0} Ảnh hưởng`}
-                            </span>
-                          </div>
-                          <p style={{ ...styles.actionDesc, fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                            {act.description}
-                          </p>
-                          <div style={{ ...styles.actionFooterRow, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ ...styles.actionTypeTag, fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                              {isCompleted ? 'Đã khắc phục ✓' : `Mức độ: ${act.priority.toUpperCase()}`}
-                            </span>
-                            <button 
-                              onClick={() => {
-                                setSelectedRecForDetail(act);
-                                setRecAssigneeId(act.assigneeId || '');
-                                setRecInternalNotes(act.internalNotes || '');
-                                setRecClientNotes(act.clientNotes || '');
-                              }}
-                              style={{ 
-                                ...styles.actionBtnOptimize, 
-                                background: 'transparent',
-                                border: 'none',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.2rem',
-                                fontSize: '0.8rem',
-                                color: indicatorColor,
-                                fontWeight: isCompleted ? 500 : 600
-                              }}
-                            >
-                              <span>{isCompleted ? 'Xem Chi Tiết' : 'Sửa lỗi ngay / Phân công'}</span>
-                              <ChevronRight size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* History and Audit Records Section */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1.5rem', width: '100%' }}>
-              
-              {/* Crawl Job History Block */}
-              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
-                  <h3 style={styles.cardTitle}>Lịch sử Thu thập (Crawl Job Runs)</h3>
-                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
-                    <p style={{ ...styles.cardSubtitle, margin: 0 }}>Theo dõi quá trình chạy và lỗi của Crawler</p>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      background: 'rgba(16, 185, 129, 0.1)',
-                      color: 'var(--accent-green)',
-                      fontSize: '0.7rem',
-                      fontWeight: 650,
-                      padding: '0.15rem 0.45rem',
-                      borderRadius: '12px',
-                      border: '1px solid rgba(16, 185, 129, 0.2)'
-                    }}>
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-green)', marginRight: '4px', display: 'inline-blocks' } as any}></span>
-                      SLO: OK (&lt;24h)
-                    </span>
-                  </div>
-                </div>
-
-                {loadingCrawlsHistory ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
-                    <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
-                  </div>
-                ) : crawlsHistory.length === 0 ? (
-                  <div style={styles.emptyState}>
-                    <p style={{ color: 'var(--text-muted)' }}>Không có lịch sử chạy crawl nào cho site này.</p>
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left' }}>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Mã Job / Thời gian</th>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Trạng thái</th>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)', textAlign: 'right' }}>Thao tác</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {crawlsHistory.map((run) => (
-                          <tr key={run.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', color: 'var(--text-primary)' }}>
-                            <td style={{ padding: '0.75rem 0.5rem' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>{run.id.substring(0, 8)}...</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {new Date(run.createdAt).toLocaleString('vi-VN')}
-                              </div>
-                            </td>
-                            <td style={{ padding: '0.75rem 0.5rem' }}>
-                              <span style={{
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                display: 'inline-block',
-                                background: run.state === 'completed' ? 'rgba(34, 197, 94, 0.1)' : run.state === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(234, 179, 8, 0.1)',
-                                color: run.state === 'completed' ? 'var(--accent-green)' : run.state === 'failed' ? 'var(--accent-red)' : 'var(--accent-orange)'
-                              }}>
-                                {run.state}
-                              </span>
-                            </td>
-                            <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>
-                              <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                                {run.state === 'failed' && (
-                                  <button
-                                    onClick={() => handleReplayJob(run.id)}
-                                    style={{
-                                      background: 'var(--accent-primary)',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      padding: '0.3rem 0.6rem',
-                                      color: '#fff',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem'
-                                    }}
-                                  >
-                                    Replay
-                                  </button>
-                                )}
-                                {run.state === 'completed' && (
-                                  <button
-                                    onClick={() => handleViewRawHtml(run.id)}
-                                    style={{
-                                      background: 'rgba(255,255,255,0.06)',
-                                      border: '1px solid rgba(255,255,255,0.1)',
-                                      borderRadius: '4px',
-                                      padding: '0.3rem 0.6rem',
-                                      color: 'var(--text-primary)',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '0.2rem'
-                                    }}
-                                  >
-                                    <FileText size={12} />
-                                    <span>HTML</span>
-                                  </button>
-                                )}
-                                {(run.state === 'completed' || run.state === 'failed') && (
-                                  <button
-                                    onClick={() => handleReprocessJob(run.id)}
-                                    style={{
-                                      background: 'rgba(99, 102, 241, 0.15)',
-                                      border: '1px solid rgba(99, 102, 241, 0.3)',
-                                      borderRadius: '4px',
-                                      padding: '0.3rem 0.6rem',
-                                      color: 'rgb(165, 180, 252)',
-                                      cursor: 'pointer',
-                                      fontSize: '0.75rem'
-                                    }}
-                                  >
-                                    Reprocess
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Audit Logs Block */}
-              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
-                  <h3 style={styles.cardTitle}>Nhật ký Hệ thống (Audit Logs)</h3>
-                  <p style={styles.cardSubtitle}>Ghi nhận các chỉnh sửa cấu hình và thao tác</p>
-                </div>
-
-                {loadingAuditLogs ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
-                    <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
-                  </div>
-                ) : auditLogs.length === 0 ? (
-                  <div style={styles.emptyState}>
-                    <p style={{ color: 'var(--text-muted)' }}>Không có hoạt động hệ thống nào được ghi lại.</p>
-                  </div>
-                ) : (
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left' }}>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Thời gian / User</th>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Thao tác</th>
-                          <th style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>Đối tượng</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {auditLogs.map((log) => (
-                          <tr key={log.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', color: 'var(--text-primary)' }}>
-                            <td style={{ padding: '0.75rem 0.5rem' }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>
-                                {log.user?.name || log.user?.email || 'Hệ thống'}
-                              </div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {new Date(log.createdAt).toLocaleString('vi-VN')}
-                              </div>
-                            </td>
-                            <td style={{ padding: '0.75rem 0.5rem' }}>
-                              <code style={{ background: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '3px', fontSize: '0.75rem', color: 'var(--accent-blue)' }}>
-                                {log.action}
-                              </code>
-                            </td>
-                            <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-secondary)' }}>
-                              {log.entityType} ({log.entityId?.substring(0, 8) || 'N/A'})
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <AuditTab
+            selectedSite={selectedSite}
+            activeSite={activeSite}
+            isCrawling={isCrawling}
+            crawlStatusText={crawlStatusText}
+            recs={recs}
+            crawlsHistory={crawlsHistory}
+            loadingCrawlsHistory={loadingCrawlsHistory}
+            auditLogs={auditLogs}
+            loadingAuditLogs={loadingAuditLogs}
+            handleTriggerCrawl={handleTriggerCrawl}
+            handleReplayJob={handleReplayJob}
+            handleReprocessJob={handleReprocessJob}
+            handleViewRawHtml={handleViewRawHtml}
+            setSelectedRecForDetail={setSelectedRecForDetail}
+            setRecAssigneeId={setRecAssigneeId}
+            setRecInternalNotes={setRecInternalNotes}
+            setRecClientNotes={setRecClientNotes}
+          />
         )}
 
         {/* SEO Standards & Audit Runs Tab */}
         {activeTab === 'standards' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
-            
-            {/* Top Navigation Options */}
-            <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.5rem' }}>
-              <button
-                onClick={() => setActiveStandardsTab('browser')}
-                style={{
-                  padding: '0.6rem 1.2rem',
-                  background: activeStandardsTab === 'browser' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                  border: 'none',
-                  borderBottom: activeStandardsTab === 'browser' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                  color: activeStandardsTab === 'browser' ? 'var(--text-bright)' : 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontWeight: 650,
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  borderRadius: '4px 4px 0 0',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <BookOpen size={16} />
-                <span>Trình quản lý Tiêu chuẩn (Standards Browser)</span>
-              </button>
-              
-              <button
-                onClick={() => {
-                  setActiveStandardsTab('audit_runs');
-                  if (auditRunsList.length > 0 && !selectedAuditRunId) {
-                    setSelectedAuditRunId(auditRunsList[0].id);
-                  }
-                }}
-                style={{
-                  padding: '0.6rem 1.2rem',
-                  background: activeStandardsTab === 'audit_runs' ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                  border: 'none',
-                  borderBottom: activeStandardsTab === 'audit_runs' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                  color: activeStandardsTab === 'audit_runs' ? 'var(--text-bright)' : 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontWeight: 655,
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  borderRadius: '4px 4px 0 0',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <Activity size={16} />
-                <span>Đánh giá Dự án (Audit Runs)</span>
-              </button>
-            </div>
-
-            {/* View 1: Master standards checklist browser */}
-            {activeStandardsTab === 'browser' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', gap: '1.5rem', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: '300px' }}>
-                    <h2 style={styles.cardTitle}>Duyệt Tiêu chuẩn SEO (Mavryk Master SEO Standards)</h2>
-                    <p style={styles.cardSubtitle}>
-                      Tra cứu các phiên cập nhật chuẩn hóa chiến dịch SEO được chứng thực bởi các tổ chức uy tín trên thế giới.
-                    </p>
-                  </div>
-                  
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <label style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>Chọn phiên bản:</label>
-                    <div style={{ ...styles.siteSelectorCard, minWidth: '150px' }}>
-                      <Globe size={16} color="var(--accent-primary)" />
-                      <select
-                        value={selectedVersionId}
-                        onChange={(e) => setSelectedVersionId(e.target.value)}
-                        style={styles.selectInput}
-                      >
-                        {standardsVersions.map((v) => (
-                          <option key={v.id} value={v.id}>Phiên bản {v.version} ({v.status})</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={14} color="var(--text-secondary)" />
-                    </div>
-                  </div>
-                </div>
-
-                {loadingStandards ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
-                    <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
-                  </div>
-                ) : standardsControls.length === 0 ? (
-                  <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
-                    <AlertCircle size={32} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
-                    <p style={{ color: 'var(--text-muted)', margin: 0 }}>Không tìm thấy control hay module nào của phiên bản tiêu chuẩn này.</p>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    {/* Render controls grouped by modules */}
-                    {Object.entries(
-                      standardsControls.reduce((acc: any, ctrl: any) => {
-                        const modName = ctrl.moduleName || 'Khác';
-                        if (!acc[modName]) acc[modName] = [];
-                        acc[modName].push(ctrl);
-                        return acc;
-                      }, {})
-                    ).map(([moduleName, controls]: [string, any]) => (
-                      <div key={moduleName} className="glass-card" style={{ padding: '1.5rem' }}>
-                        <div style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-                          <h3 style={{ ...styles.cardTitle, color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span style={{ fontSize: '1.1rem' }}>{moduleName}</span>
-                            <span style={{
-                              background: 'rgba(255,255,255,0.06)',
-                              color: 'var(--text-secondary)',
-                              fontSize: '0.75rem',
-                              padding: '0.1rem 0.4rem',
-                              borderRadius: '3px',
-                              fontWeight: 500
-                            }}>{controls.length} tiêu chí</span>
-                          </h3>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                          {controls.map((ctrl: any) => (
-                            <div
-                              key={ctrl.controlId}
-                              style={{
-                                padding: '1rem',
-                                background: 'rgba(255, 255, 255, 0.02)',
-                                border: '1px solid rgba(255, 255, 255, 0.04)',
-                                borderRadius: '6px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.5rem'
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <span style={{
-                                    fontFamily: 'monospace',
-                                    fontWeight: 700,
-                                    fontSize: '0.85rem',
-                                    padding: '0.2rem 0.5rem',
-                                    borderRadius: '4px',
-                                    background: 'rgba(99, 102, 241, 0.2)',
-                                    color: 'var(--accent-primary)'
-                                  }}>{ctrl.controlCode}</span>
-                                  
-                                  <span style={{
-                                    fontSize: '0.75rem',
-                                    padding: '0.1rem 0.4rem',
-                                    borderRadius: '4px',
-                                    fontWeight: 650,
-                                    background: ctrl.controlPhase === 'P0' ? 'rgba(239, 68, 68, 0.15)' : ctrl.controlPhase === 'P1' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                                    color: ctrl.controlPhase === 'P0' ? 'var(--accent-red)' : ctrl.controlPhase === 'P1' ? 'var(--accent-orange)' : 'var(--accent-blue)'
-                                  }}>{ctrl.controlPhase} Priority</span>
-                                </div>
-                              </div>
-
-                              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-bright)', lineHeight: '1.4' }}>
-                                {ctrl.controlDescription}
-                              </p>
-
-                              {/* Sources and authorities references */}
-                              {ctrl.sources && ctrl.sources.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Cơ sở tham chiếu:</span>
-                                  {ctrl.sources.map((src: any, idx: number) => (
-                                    <a
-                                      key={idx}
-                                      href={src.url || '#'}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.25rem',
-                                        fontSize: '0.75rem',
-                                        color: 'var(--accent-secondary)',
-                                        textDecoration: 'none',
-                                        background: 'rgba(168, 85, 247, 0.08)',
-                                        padding: '0.15rem 0.4rem',
-                                        borderRadius: '3px',
-                                        border: '1px solid rgba(168, 85, 247, 0.15)',
-                                        transition: 'all 0.2s ease'
-                                      }}
-                                    >
-                                      <span>{src.name}</span>
-                                      <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>[{src.authorityLevel}]</span>
-                                      <ExternalLink size={10} />
-                                    </a>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* View 2: Audit Runs management */}
-            {activeStandardsTab === 'audit_runs' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 320px) minmax(0, 1fr)', gap: '1.5rem', alignItems: 'flex-start' }}>
-                
-                {/* Left panel: Runs History & Trigger Action */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  <div className="glass-card" style={{ padding: '1.25rem' }}>
-                    <h3 style={{ ...styles.cardTitle, marginBottom: '0.75rem' }}>Đánh giá Dự án</h3>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
-                      <div>
-                        <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem' }}>Phiên bản chuẩn đối sánh:</label>
-                        <select
-                          value={selectedVersionId}
-                          onChange={(e) => setSelectedVersionId(e.target.value)}
-                          style={{ ...styles.formInput, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
-                        >
-                          {standardsVersions.map((v) => (
-                            <option key={v.id} value={v.id}>Phiên bản {v.version}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <button
-                        onClick={handleTriggerAuditRun}
-                        disabled={triggeringAudit || !selectedVersionId}
-                        style={{
-                          width: '100%',
-                          padding: '0.5rem 1rem',
-                          background: 'var(--accent-primary)',
-                          border: 'none',
-                          borderRadius: '4px',
-                          color: '#fff',
-                          fontWeight: 600,
-                          cursor: (triggeringAudit || !selectedVersionId) ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.4rem',
-                          fontSize: '0.85rem',
-                          opacity: (triggeringAudit || !selectedVersionId) ? 0.7 : 1,
-                        }}
-                      >
-                        {triggeringAudit ? (
-                          <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                        ) : (
-                          <Search size={14} />
-                        )}
-                        <span>{triggeringAudit ? 'Đang khởi chạy...' : 'Khởi chạy Đánh giá mới'}</span>
-                      </button>
-                    </div>
-
-                    <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
-                      <h4 style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', fontWeight: 655 }}>Lịch sử Đánh giá</h4>
-                      
-                      {auditRunsList.length === 0 ? (
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic', textAlign: 'center', margin: '1rem 0' }}>Chưa có lượt chạy kiểm toán tiêu chuẩn nào.</p>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '350px', overflowY: 'auto' }}>
-                          {auditRunsList.map((run) => (
-                            <button
-                              key={run.id}
-                              onClick={() => {
-                                setSelectedAuditRunId(run.id);
-                                fetchAuditResults(run.id);
-                              }}
-                              style={{
-                                width: '100%',
-                                padding: '0.75rem',
-                                background: selectedAuditRunId === run.id ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.02)',
-                                border: selectedAuditRunId === run.id ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.04)',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.2rem',
-                                transition: 'all 0.15s ease'
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                                <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', fontWeight: 655, color: selectedAuditRunId === run.id ? 'var(--text-bright)' : 'var(--text-secondary)' }}>
-                                  RUN-{run.id.substring(0, 6).toUpperCase()}
-                                </span>
-                                <span style={{
-                                  fontSize: '0.7rem',
-                                  padding: '0.1rem 0.3rem',
-                                  borderRadius: '3px',
-                                  background: run.status === 'active' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255,255,255,0.1)',
-                                  color: run.status === 'active' ? 'var(--accent-green)' : 'var(--text-secondary)'
-                                }}>{run.status}</span>
-                              </div>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {new Date(run.createdAt).toLocaleString('vi-VN')}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right panel: Results detail list */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1 }}>
-                  {!selectedAuditRunId ? (
-                    <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
-                      <Activity size={32} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
-                      <p style={{ color: 'var(--text-muted)' }}>Vui lòng chọn hoặc khởi chạy một lượt đánh giá tiêu chuẩn bên cột trái để xem chi tiết.</p>
-                    </div>
-                  ) : loadingResults ? (
-                    <div className="glass-card" style={{ padding: '4rem', textAlign: 'center' }}>
-                      <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)', marginBottom: '0.5rem' }} />
-                      <p style={{ color: 'var(--text-muted)' }}>Đang tải danh sách kết quả checklist...</p>
-                    </div>
-                  ) : auditResultsList.length === 0 ? (
-                    <div className="glass-card" style={{ padding: '3rem', textAlign: 'center' }}>
-                      <AlertCircle size={32} color="var(--accent-orange)" style={{ marginBottom: '1rem' }} />
-                      <p style={{ color: 'var(--text-muted)' }}>Đang tạo hoặc không tìm thấy dữ liệu kết quả kiểm toán.</p>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      
-                      {/* Summary dashboard of selected run results */}
-                      <div className="glass-card" style={{ padding: '1.25rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mã Chạy Kiểm Toán</h4>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-bright)', fontFamily: 'monospace' }}>RUN-{selectedAuditRunId.toUpperCase()}</div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                            Phiên bản: <strong style={{ color: 'var(--accent-primary)' }}>{auditResultsList[0]?.versionCode || 'Master v1.0'}</strong>
-                          </span>
-                        </div>
-
-                        {/* Quick counts */}
-                        <div style={{ display: 'flex', gap: '1rem' }}>
-                          {[
-                            { label: 'Cần Duyệt', value: auditResultsList.filter(r => r.result === 'NEED_DATA').length, color: 'var(--text-muted)', bg: 'rgba(255,255,255,0.06)' },
-                            { label: 'Đạt (PASS)', value: auditResultsList.filter(r => r.result === 'PASS').length, color: 'var(--accent-green)', bg: 'rgba(16, 185, 129, 0.1)' },
-                            { label: 'Cảnh Báo', value: auditResultsList.filter(r => r.result === 'WARNING').length, color: 'var(--accent-orange)', bg: 'rgba(245, 158, 11, 0.1)' },
-                            { label: 'Không Đạt (FAIL)', value: auditResultsList.filter(r => r.result === 'FAIL').length, color: 'var(--accent-red)', bg: 'rgba(239, 68, 68, 0.1)' },
-                          ].map((stat, idx) => (
-                            <div key={idx} style={{ padding: '0.5rem 0.75rem', background: stat.bg, borderRadius: '4px', textAlign: 'center', minWidth: '80px', border: `1px solid ${stat.color}20` }}>
-                              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: stat.color }}>{stat.value}</div>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{stat.label}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Group and render results by modules */}
-                      {Object.entries(
-                        auditResultsList.reduce((acc: any, res: any) => {
-                          const modName = res.moduleName || 'Khác';
-                          if (!acc[modName]) acc[modName] = [];
-                          acc[modName].push(res);
-                          return acc;
-                        }, {})
-                      ).map(([moduleName, results]: [string, any]) => (
-                        <div key={moduleName} className="glass-card" style={{ padding: '1.25rem' }}>
-                          <h4 style={{ ...styles.cardTitle, color: 'var(--accent-primary)', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.5rem', marginBottom: '1rem', fontSize: '0.95rem' }}>
-                            {moduleName}
-                          </h4>
-
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            {results.map((res: any) => {
-                              const isEditing = editingResultId === res.resultId;
-                              
-                              // Badge styling mapping
-                              let badgeColor = 'var(--text-muted)';
-                              let badgeBg = 'rgba(255, 255, 255, 0.06)';
-                              if (res.result === 'PASS') {
-                                badgeColor = 'var(--accent-green)';
-                                badgeBg = 'rgba(16, 185, 129, 0.15)';
-                              } else if (res.result === 'FAIL') {
-                                badgeColor = 'var(--accent-red)';
-                                badgeBg = 'rgba(239, 68, 68, 0.15)';
-                              } else if (res.result === 'WARNING') {
-                                badgeColor = 'var(--accent-orange)';
-                                badgeBg = 'rgba(245, 158, 11, 0.15)';
-                              } else if (res.result === 'ACCEPTED_RISK') {
-                                badgeColor = 'var(--accent-blue)';
-                                badgeBg = 'rgba(59, 130, 246, 0.15)';
-                              }
-
-                              return (
-                                <div
-                                  key={res.resultId}
-                                  style={{
-                                    padding: '0.85rem',
-                                    background: 'rgba(255,255,255,0.01)',
-                                    border: '1px solid rgba(255,255,255,0.04)',
-                                    borderRadius: '5px',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '0.5rem'
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                      <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-bright)' }}>{res.controlCode}</span>
-                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>| {res.controlPhase}</span>
-                                    </div>
-                                    
-                                    <span style={{
-                                      fontSize: '0.7rem',
-                                      fontWeight: 650,
-                                      padding: '0.15rem 0.45rem',
-                                      borderRadius: '4px',
-                                      color: badgeColor,
-                                      background: badgeBg,
-                                      border: `1px solid ${badgeColor}30`,
-                                      textTransform: 'uppercase'
-                                    }}>{res.result}</span>
-                                  </div>
-
-                                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                                    {res.controlDescription}
-                                  </p>
-
-                                  {/* Exception information if any */}
-                                  {res.exceptionReason && (
-                                    <div style={{
-                                      marginTop: '0.25rem',
-                                      padding: '0.5rem',
-                                      borderRadius: '4px',
-                                      background: 'rgba(168, 85, 247, 0.06)',
-                                      borderLeft: '3px solid var(--accent-secondary)',
-                                      fontSize: '0.75rem',
-                                      color: 'var(--text-muted)'
-                                    }}>
-                                      <strong>Ghi chú / Ngoại lệ:</strong> {res.exceptionReason}
-                                      {res.reviewerEmail && ` (Xác minh bởi: ${res.reviewerEmail})`}
-                                    </div>
-                                  )}
-
-                                  {/* Manual review controls */}
-                                  {editingResultId !== res.resultId ? (
-                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
-                                      <button
-                                        onClick={() => {
-                                          setEditingResultId(res.resultId);
-                                          setEditResultStatus(res.result === 'NEED_DATA' ? 'PASS' : res.result);
-                                          setEditExceptionReason(res.exceptionReason || '');
-                                        }}
-                                        style={{
-                                          background: 'transparent',
-                                          border: 'none',
-                                          color: 'var(--accent-secondary)',
-                                          fontSize: '0.75rem',
-                                          cursor: 'pointer',
-                                          fontWeight: 650,
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '0.2rem',
-                                          opacity: 0.8,
-                                          padding: '0.1rem 0.2rem'
-                                        }}
-                                      >
-                                        <Settings size={12} />
-                                        <span>Cập nhật kết quả / Ghi chú ngoại lệ</span>
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div style={{
-                                      marginTop: '0.75rem',
-                                      padding: '0.75rem',
-                                      background: 'rgba(255, 255, 255, 0.02)',
-                                      border: '1px dashed rgba(255, 255, 255, 0.1)',
-                                      borderRadius: '4px',
-                                      display: 'flex',
-                                      flexDirection: 'column',
-                                      gap: '0.65rem'
-                                    }}>
-                                      <h5 style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-bright)' }}>Xác thực thủ công tiêu chí {res.controlCode}</h5>
-                                      
-                                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Kết quả đánh giá:</label>
-                                        <div style={{ ...styles.siteSelectorCard, minWidth: '130px', padding: '0.25rem 0.5rem' }}>
-                                          <select
-                                            value={editResultStatus}
-                                            onChange={(e) => setEditResultStatus(e.target.value)}
-                                            style={{ ...styles.selectInput, fontSize: '0.75rem' }}
-                                          >
-                                            <option value="PASS">PASS (Đạt)</option>
-                                            <option value="FAIL">FAIL (Không đạt)</option>
-                                            <option value="WARNING">WARNING (Cảnh báo)</option>
-                                            <option value="ACCEPTED_RISK">ACCEPTED RISK (Chấp nhận rủi ro)</option>
-                                          </select>
-                                          <ChevronDown size={12} color="var(--text-secondary)" />
-                                        </div>
-                                      </div>
-
-                                      <div>
-                                        <label style={{ ...styles.formLabel, display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>
-                                          Mô tả chi tiết / Lý do chấp nhận ngoại lệ
-                                        </label>
-                                        <textarea
-                                          value={editExceptionReason}
-                                          onChange={(e) => setEditExceptionReason(e.target.value)}
-                                          placeholder="Nêu rõ lý do hoặc kết quả đo kiểm, liên kết hồ sơ chi tiết đối sánh nếu có..."
-                                          style={{ ...styles.formInput, height: '60px', padding: '0.4rem', fontSize: '0.8rem' }}
-                                        />
-                                      </div>
-
-                                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                                        <button
-                                          onClick={() => setEditingResultId(null)}
-                                          disabled={submittingVerification}
-                                          style={{
-                                            padding: '0.3rem 0.6rem',
-                                            background: 'rgba(255, 255, 255, 0.05)',
-                                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                                            borderRadius: '3px',
-                                            color: 'var(--text-secondary)',
-                                            cursor: 'pointer',
-                                            fontSize: '0.75rem'
-                                          }}
-                                        >
-                                          Hủy
-                                        </button>
-                                        
-                                        <button
-                                          onClick={() => handleVerifyControlResult(res.resultId)}
-                                          disabled={submittingVerification}
-                                          style={{
-                                            padding: '0.3rem 0.6rem',
-                                            background: 'var(--accent-primary)',
-                                            border: 'none',
-                                            borderRadius: '3px',
-                                            color: '#fff',
-                                            cursor: submittingVerification ? 'not-allowed' : 'pointer',
-                                            fontSize: '0.75rem',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.2rem'
-                                          }}
-                                        >
-                                          {submittingVerification && <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />}
-                                          <span>Lưu thay đổi</span>
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <StandardsTab
+            activeStandardsTab={activeStandardsTab}
+            setActiveStandardsTab={setActiveStandardsTab}
+            selectedVersionId={selectedVersionId}
+            setSelectedVersionId={setSelectedVersionId}
+            standardsVersions={standardsVersions}
+            loadingStandards={loadingStandards}
+            standardsControls={standardsControls}
+            selectedAuditRunId={selectedAuditRunId}
+            setSelectedAuditRunId={setSelectedAuditRunId}
+            auditRunsList={auditRunsList}
+            loadingResults={loadingResults}
+            auditResultsList={auditResultsList}
+            triggeringAudit={triggeringAudit}
+            editingResultId={editingResultId}
+            setEditingResultId={setEditingResultId}
+            editResultStatus={editResultStatus}
+            setEditResultStatus={setEditResultStatus}
+            editExceptionReason={editExceptionReason}
+            setEditExceptionReason={setEditExceptionReason}
+            submittingVerification={submittingVerification}
+            handleTriggerAuditRun={handleTriggerAuditRun}
+            fetchAuditResults={fetchAuditResults}
+            handleVerifyControlResult={handleVerifyControlResult}
+            sitesList={sitesList}
+            selectedSite={selectedSite}
+            workspaceId={workspaceId}
+            token={token}
+          />
         )}
 
         {/* Rank Tracker Tab */}
         {activeTab === 'keywords' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
-            {/* Keyword Addition Form */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <h2 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Theo dõi Từ khóa (Track New Keywords)</h2>
-              
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: 1, minWidth: '240px' }}>
-                  <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem' }}>Từ khóa tìm kiếm (Keyword)*</label>
-                  <input
-                    type="text"
-                    value={newKeywordInput}
-                    onChange={e => setNewKeywordInput(e.target.value)}
-                    placeholder="Ví dụ: công cụ seo ai, rank tracker..."
-                    style={styles.formInput}
-                  />
-                </div>
-
-                <div style={{ flex: 1, minWidth: '240px' }}>
-                  <label style={{ ...styles.formLabel, display: 'block', marginBottom: '0.4rem' }}>URL Đích mong muốn (Target URL)</label>
-                  <input
-                    type="text"
-                    value={newKeywordTargetUrl}
-                    onChange={e => setNewKeywordTargetUrl(e.target.value)}
-                    placeholder="Ví dụ: https://domain.com/blog/seo"
-                    style={styles.formInput}
-                  />
-                </div>
-
-                <button
-                  onClick={handleAddKeyword}
-                  disabled={isAddingKeyword}
-                  style={{
-                    ...styles.submitBtn,
-                    marginTop: 0,
-                    padding: '0.6rem 1.5rem',
-                    background: 'var(--accent-primary)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: 'var(--radius-sm)',
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                  }}
-                >
-                  {isAddingKeyword ? (
-                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                  ) : (
-                    <Plus size={16} />
-                  )}
-                  <span>Thêm Từ Khóa</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Keyword Table Card */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <div style={{ ...styles.cardHeader, marginBottom: '1.25rem' }}>
-                <h3 style={styles.cardTitle}>Danh sách Từ khóa đang theo dõi</h3>
-                <p style={styles.cardSubtitle}>Theo dõi vị trí thực tế trên Google Search Engine thu thập qua ClickHouse</p>
-              </div>
-
-              {keywordsList.length === 0 ? (
-                <div style={styles.emptyState}>
-                  <p>Chưa có từ khóa nào được theo dõi. Hãy nhập từ khóa ở phía trên để hệ thống bắt đầu giám sát thứ hạng!</p>
-                </div>
-              ) : (
-                <div style={styles.tableWrapper}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr style={styles.trHead}>
-                        <th style={{ ...styles.th, textAlign: 'left' }}>Từ khóa</th>
-                        <th style={{ ...styles.th, textAlign: 'left' }}>Target URL</th>
-                        <th style={{ ...styles.th, textAlign: 'center' }}>Thứ hạng (Rank)</th>
-                        <th style={{ ...styles.th, textAlign: 'center' }}>Lượng Tìm kiếm (Vol)</th>
-                        <th style={{ ...styles.th, textAlign: 'center' }}>Độ khó (KD)</th>
-                        <th style={{ ...styles.th, textAlign: 'center' }}>Hành động</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {keywordsList.map((kw: any) => {
-                        const rankVal = kw.latestRank;
-                        const hasRank = rankVal !== null && rankVal !== undefined && rankVal > 0;
-                        
-                        return (
-                          <tr key={kw.id} style={styles.trBody}>
-                            <td style={{ ...styles.tdKeyword, textAlign: 'left' }}>{kw.keyword}</td>
-                            <td style={{ ...styles.td, textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                              {kw.targetUrl || <span style={{ fontStyle: 'italic' }}>Tự động phát hiện</span>}
-                            </td>
-                            <td style={{ ...styles.td, textAlign: 'center' }}>
-                              <span style={{
-                                ...styles.badgePosition,
-                                background: hasRank && rankVal <= 3 ? 'rgba(16, 185, 129, 0.15)' : hasRank && rankVal <= 10 ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                                color: hasRank && rankVal <= 3 ? 'var(--accent-green)' : hasRank && rankVal <= 10 ? 'var(--accent-primary)' : 'var(--text-primary)',
-                                fontWeight: 600,
-                                padding: '0.2rem 0.5rem',
-                                borderRadius: '4px',
-                                fontSize: '0.85rem'
-                              }}>
-                                {hasRank ? `#${rankVal}` : 'Đang quét...'}
-                              </span>
-                              {hasRank && renderProvenanceBadge('observed')}
-                            </td>
-                            <td style={{ ...styles.td, textAlign: 'center' }}>
-                              <span>{kw.volume ? kw.volume.toLocaleString() : 'N/A'}</span>
-                              {!!kw.volume && renderProvenanceBadge('estimated')}
-                            </td>
-                            <td style={{ ...styles.td, textAlign: 'center' }}>
-                              {kw.difficulty ? (
-                                <>
-                                  <span style={{
-                                    color: kw.difficulty > 60 ? 'var(--accent-red)' : kw.difficulty > 35 ? 'var(--accent-orange)' : 'var(--accent-green)',
-                                    fontWeight: 500
-                                  }}>
-                                    {kw.difficulty}%
-                                  </span>
-                                  {renderProvenanceBadge('estimated')}
-                                </>
-                              ) : 'N/A'}
-                            </td>
-                            <td style={{ ...styles.td, textAlign: 'center' }}>
-                              <button
-                                onClick={() => handleDeleteKeyword(kw.id)}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: 'var(--accent-red)',
-                                  cursor: 'pointer',
-                                  fontSize: '0.8rem',
-                                  padding: '0.25rem 0.5rem',
-                                  borderRadius: '4px',
-                                  transition: 'background 0.2s'
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)')}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                              >
-                                Xóa
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+          <RankTrackerTab
+            newKeywordInput={newKeywordInput}
+            setNewKeywordInput={setNewKeywordInput}
+            newKeywordTargetUrl={newKeywordTargetUrl}
+            setNewKeywordTargetUrl={setNewKeywordTargetUrl}
+            isAddingKeyword={isAddingKeyword}
+            handleAddKeyword={handleAddKeyword}
+            keywordsList={keywordsList}
+            handleDeleteKeyword={handleDeleteKeyword}
+          />
         )}
 
         {/* Reports Tab */}
         {activeTab === 'reports' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem', width: '100%', alignItems: 'start' }}>
-            {/* Create Report Card */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Tạo Báo Cáo SEO</h3>
-              <form onSubmit={handleCreateReport} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div>
-                  <label style={styles.formLabel}>Tiêu đề báo cáo</label>
-                  <input
-                    type="text"
-                    value={newReportTitle}
-                    onChange={e => setNewReportTitle(e.target.value)}
-                    placeholder="Ví dụ: Báo cáo SEO Q3 2026"
-                    style={styles.formInput}
-                    required
-                  />
-                </div>
-                <div>
-                  <label style={styles.formLabel}>Loại báo cáo</label>
-                  <select
-                    value={newReportType}
-                    onChange={e => setNewReportType(e.target.value)}
-                    style={styles.formInput}
-                  >
-                    <option value="audit">Site Audit (Kiểm toán kỹ thuật)</option>
-                    <option value="keywords">Rank Tracker (Thứ hạng từ khóa)</option>
-                  </select>
-                </div>
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                  borderRadius: '6px',
-                  padding: '0.75rem',
-                  fontSize: '0.8rem',
-                  color: 'var(--text-secondary)'
-                }}>
-                  <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Thông tin White-label:</p>
-                  <p>• Logo: {activeSite?.domain || 'Mavryk Logo'}</p>
-                  <p>• Màu chủ đạo: Indigo / Teal</p>
-                </div>
-                <button
-                  type="submit"
-                  style={{ ...styles.submitBtn, width: '100%', marginTop: '0.5rem' }}
-                >
-                  Tạo Báo Cáo ngay
-                </button>
-              </form>
-            </div>
-
-            {/* Reports List Card */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Lịch sử Báo Cáo</h3>
-              {reportsList.length === 0 ? (
-                <div style={styles.emptyState}>
-                  <p>Chưa có báo cáo nào được tạo cho dự án này.</p>
-                </div>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', textAlign: 'left' }}>
-                        <th style={{ padding: '0.75rem 0.5rem' }}>Tiêu đề</th>
-                        <th style={{ padding: '0.75rem 0.5rem' }}>Loại</th>
-                        <th style={{ padding: '0.75rem 0.5rem' }}>Trạng thái</th>
-                        <th style={{ padding: '0.75rem 0.5rem' }}>Ngày tạo</th>
-                        <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Hành động</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportsList.map((rep) => (
-                        <tr key={rep.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)', color: 'var(--text-primary)' }}>
-                          <td style={{ padding: '0.75rem 0.5rem', fontWeight: 600 }}>{rep.title}</td>
-                          <td style={{ padding: '0.75rem 0.5rem', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--accent-secondary)' }}>{rep.type}</td>
-                          <td style={{ padding: '0.75rem 0.5rem' }}>
-                            <span style={{
-                              background: 'rgba(16, 185, 129, 0.1)',
-                              color: 'var(--accent-green)',
-                              padding: '0.1rem 0.4rem',
-                              borderRadius: '4px',
-                              fontSize: '0.7rem',
-                              fontWeight: 700
-                            }}>
-                              {rep.status}
-                            </span>
-                          </td>
-                          <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)' }}>
-                            {new Date(rep.createdAt).toLocaleDateString('vi-VN')}
-                          </td>
-                          <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>
-                            <button
-                              onClick={() => setSelectedReport(rep)}
-                              style={{
-                                background: 'rgba(99, 102, 241, 0.1)',
-                                border: '1px solid var(--accent-primary)',
-                                color: 'var(--accent-primary)',
-                                padding: '0.3rem 0.6rem',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                cursor: 'pointer',
-                                fontWeight: 600
-                              }}
-                            >
-                              Xem Báo Cáo
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+          <ReportsTab
+            newReportTitle={newReportTitle}
+            setNewReportTitle={setNewReportTitle}
+            newReportType={newReportType}
+            setNewReportType={setNewReportType}
+            reportsList={reportsList}
+            setSelectedReport={setSelectedReport}
+            handleCreateReport={handleCreateReport}
+            activeSite={activeSite}
+          />
         )}
 
         {/* Backlinks Tab */}
         {activeTab === 'backlinks' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '400px', width: '100%', textAlign: 'center' }}>
-            <div className="glass-card" style={{ padding: '3rem', maxWidth: '500px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
-              <div style={{
-                background: 'rgba(59, 130, 246, 0.1)',
-                color: 'var(--accent-primary)',
-                width: '64px',
-                height: '64px',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 0 20px rgba(59, 130, 246, 0.2)'
-              }}>
-                <Link2 size={32} />
+          <BacklinksTab />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsTab
+            projectName={projectName}
+            setProjectName={setProjectName}
+            workspaceId={workspaceId}
+            isGscConnected={isGscConnected}
+            setIsGscConnected={setIsGscConnected}
+            workspacePlan={workspacePlan}
+            handleTogglePlan={handleTogglePlan}
+            sitesList={sitesList}
+            keywordsList={keywordsList}
+            contentPlansList={contentPlansList}
+            membersList={membersList}
+            newMemberEmail={newMemberEmail}
+            setNewMemberEmail={setNewMemberEmail}
+            newMemberRole={newMemberRole}
+            setNewMemberRole={setNewMemberRole}
+            handleAddMember={handleAddMember}
+            activeSite={activeSite}
+            token={token}
+            projectId={projectId}
+          />
+        )}
+
+        {/* Import URL Modal */}
+        {showImportModal && (
+          <div className="settings-tab__element-224--auto-224">
+            <div className="glass-card modal-box modal-box--sm">
+              <div className="settings-tab__element-226--auto-226">
+                <h3 className="settings-tab__title--auto-227">Import Article from URL</h3>
+                <button onClick={() => setShowImportModal(false)} className="settings-tab__btn-close--auto-228">×</button>
               </div>
-              <div>
-                <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Tính Năng Đang Phát Triển</h3>
-                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-                  Hệ thống phân tích liên kết (Backlink Analysis) đang được phát triển. Tính năng này sẽ cho phép theo dõi, kiểm tra chất lượng backlink và lập chỉ mục liên kết tự động.
-                </p>
-              </div>
-              <div style={{
-                background: 'rgba(255, 255, 255, 0.02)',
-                border: '1px solid rgba(255, 255, 255, 0.05)',
-                borderRadius: '8px',
-                padding: '0.75rem 1rem',
-                fontSize: '0.8rem',
-                color: 'var(--accent-primary)',
-                fontWeight: 600
-              }}>
-                COMING SOON IN VERSION 1.1
+              <div className="font-size-md modal-body--form">
+                <div>
+                  <label className="jss-form-label">Article URL</label>
+                  <input type="text" value={importUrlStr} onChange={e => setImportUrlStr(e.target.value)} placeholder="https://example.com/blog/article" className="dashboard-form__input" />
+                </div>
+                <div>
+                  <label className="jss-form-label">Primary Keyword</label>
+                  <input type="text" value={importKeyword} onChange={e => setImportKeyword(e.target.value)} placeholder="e.g. react seo" className="dashboard-form__input" />
+                </div>
+                <div>
+                  <label className="jss-form-label">Topic Authority Group</label>
+                  <select value={importTopicId} onChange={e => setImportTopicId(e.target.value)} className="dashboard-form__select">
+                    <option value="">None</option>
+                    {topicsList.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="modal-footer">
+                  <button onClick={() => setShowImportModal(false)} className="modal-btn-secondary">Cancel</button>
+                  <button onClick={handleImportUrl} disabled={isImporting} className="modal-btn-primary">
+                    {isImporting ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Settings Tab */}
-        {activeTab === 'settings' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
-            {/* General & Integrations */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-              
-              {/* Project settings card */}
-              <div className="glass-card" style={{ padding: '1.5rem' }}>
-                <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Cấu hình Dự án (Project Config)</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div>
-                    <label style={styles.formLabel}>Tên dự án hiện tại</label>
-                    <input
-                      type="text"
-                      value={projectName}
-                      onChange={e => setProjectName(e.target.value)}
-                      style={styles.formInput}
-                    />
-                  </div>
-                  <div>
-                    <label style={styles.formLabel}>Workspace ID</label>
-                    <input
-                      type="text"
-                      value={workspaceId || ''}
-                      disabled
-                      style={{ ...styles.formInput, opacity: 0.6, cursor: 'not-allowed' }}
-                    />
-                  </div>
-                  <button
-                    onClick={() => alert('Đã cập nhật tên dự án thành công!')}
-                    style={{ ...styles.submitBtn, width: 'fit-content', padding: '0.5rem 1rem' }}
-                  >
-                    Lưu cấu hình
+        {/* Publish Content Plan Modal */}
+        {showPublishModal && (
+          <div className="settings-tab__element-224--auto-224">
+            <div className="glass-card modal-box modal-box--sm">
+              <div className="settings-tab__element-226--auto-226">
+                <h3 className="settings-tab__title--auto-227">Publish Content Plan</h3>
+                <button onClick={() => { setShowPublishModal(false); setPublishingPlanId(null); }} className="settings-tab__btn-close--auto-228">×</button>
+              </div>
+              <div className="font-size-md modal-body--form">
+                <p className="modal-desc">
+                  Please enter the live URL where this article has been published to track its performance.
+                </p>
+                <div>
+                  <label className="jss-form-label">Live Publish URL</label>
+                  <input type="text" value={publishUrlStr} onChange={e => setPublishUrlStr(e.target.value)} placeholder="https://yourdomain.com/blog/live-article" className="dashboard-form__input" />
+                </div>
+                <div className="modal-footer">
+                  <button onClick={() => { setShowPublishModal(false); setPublishingPlanId(null); }} className="modal-btn-secondary">Cancel</button>
+                  <button onClick={handlePublishContent} disabled={isPublishing} className="modal-btn-primary">
+                    {isPublishing ? 'Publishing...' : 'Mark as Published'}
                   </button>
                 </div>
-              </div>
 
-              {/* GSC card */}
-              <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <h3 style={{ ...styles.cardTitle, marginBottom: '0.5rem' }}>Google Search Console (GSC)</h3>
-                  <p style={{ ...styles.cardSubtitle, marginBottom: '1rem' }}>
-                    Kết nối tài khoản Google để đồng bộ dữ liệu Clicks, Impressions, CTR trực tiếp từ Google API.
-                  </p>
-                </div>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.75rem',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                    borderRadius: '8px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Globe size={18} color={isGscConnected ? 'var(--accent-green)' : 'var(--text-muted)'} />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {isGscConnected ? 'Trạng thái: Đã kết nối' : 'Trạng thái: Chưa kết nối'}
-                      </span>
-                    </div>
-                    <span style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
-                      background: isGscConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                      color: isGscConnected ? 'var(--accent-green)' : 'var(--text-muted)',
-                      padding: '0.1rem 0.4rem',
-                      borderRadius: '4px'
-                    }}>
-                      {isGscConnected ? 'ACTIVE' : 'INACTIVE'}
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setIsGscConnected(!isGscConnected);
-                      alert(isGscConnected ? 'Đã ngắt kết nối Google Search Console!' : 'Đã kết nối thành công Google Search Console!');
-                    }}
-                    style={{
-                      ...styles.submitBtn,
-                      background: isGscConnected ? 'rgba(239, 68, 68, 0.1)' : 'var(--accent-primary)',
-                      border: isGscConnected ? '1px solid var(--accent-red)' : 'none',
-                      color: isGscConnected ? 'var(--accent-red)' : 'white',
-                      fontWeight: 600
-                    }}
-                  >
-                    {isGscConnected ? 'Ngắt Kết Nối GSC' : 'Liên kết tài khoản Google'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Quota Limits & Plans */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '1rem', marginBottom: '1.25rem' }}>
-                <div>
-                  <h3 style={styles.cardTitle}>Hạn mức & Gói Workspace (Plan & Quotas)</h3>
-                  <p style={styles.cardSubtitle}>Kiểm soát và gia hạn giới hạn tài nguyên của workspace</p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    Gói hiện tại: <strong style={{ color: 'var(--accent-primary)', textTransform: 'uppercase' }}>{workspacePlan}</strong>
-                  </span>
-                  <button
-                    onClick={handleTogglePlan}
-                    style={{
-                      ...styles.submitBtn,
-                      marginTop: 0,
-                      background: 'rgba(99, 102, 241, 0.1)',
-                      color: 'var(--accent-primary)',
-                      border: '1px solid var(--accent-primary)',
-                      padding: '0.4rem 0.8rem',
-                      fontSize: '0.8rem'
-                    }}
-                  >
-                    {workspacePlan === 'free' ? 'Nâng cấp lên PRO' : 'Hạ cấp xuống FREE'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Progress bars */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {/* Sites Limit */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Số lượng Website (Sites)</span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {sitesList.length} / {workspacePlan === 'free' ? 1 : 10} Sites
-                    </span>
-                  </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${Math.min(100, (sitesList.length / (workspacePlan === 'free' ? 1 : 10)) * 100)}%`,
-                      height: '100%',
-                      background: 'var(--accent-primary)',
-                      borderRadius: '4px',
-                      transition: 'width 0.3s ease'
-                    }} />
-                  </div>
-                </div>
-
-                {/* Keywords Limit */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>Từ khóa Theo dõi (Keywords)</span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {keywordsList.length} / {workspacePlan === 'free' ? 5 : 100} Keywords
-                    </span>
-                  </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${Math.min(100, (keywordsList.length / (workspacePlan === 'free' ? 5 : 100)) * 100)}%`,
-                      height: '100%',
-                      background: 'var(--accent-secondary)',
-                      borderRadius: '4px',
-                      transition: 'width 0.3s ease'
-                    }} />
-                  </div>
-                </div>
-
-                {/* Briefs Limit */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.4rem' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>AI Content Briefs đã tạo</span>
-                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                      {contentPlansList.filter(p => p.body).length} / {workspacePlan === 'free' ? 3 : 50} Briefs
-                    </span>
-                  </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${Math.min(100, (contentPlansList.filter(p => p.body).length / (workspacePlan === 'free' ? 3 : 50)) * 100)}%`,
-                      height: '100%',
-                      background: 'var(--accent-green)',
-                      borderRadius: '4px',
-                      transition: 'width 0.3s ease'
-                    }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Team Management Card */}
-            <div className="glass-card" style={{ padding: '1.5rem' }}>
-              <h3 style={{ ...styles.cardTitle, marginBottom: '1rem' }}>Thành viên Workspace (Team Members)</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem' }}>
-                {/* Form to add member */}
-                <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>Thêm Thành Viên</h4>
-                  <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    <div>
-                      <label style={styles.formLabel}>Email</label>
-                      <input
-                        type="email"
-                        value={newMemberEmail}
-                        onChange={e => setNewMemberEmail(e.target.value)}
-                        placeholder="email@domain.com"
-                        style={styles.formInput}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.formLabel}>Vai trò</label>
-                      <select
-                        value={newMemberRole}
-                        onChange={e => setNewMemberRole(e.target.value)}
-                        style={styles.formInput}
-                      >
-                        <option value="owner">Owner (Chủ sở hữu)</option>
-                        <option value="admin">Admin (Quản trị viên)</option>
-                        <option value="manager">Manager (Quản lý)</option>
-                        <option value="seo">SEO specialist (Chuyên viên SEO)</option>
-                        <option value="content">Content specialist (Chuyên viên Nội dung)</option>
-                        <option value="client">Client (Khách hàng)</option>
-                        <option value="viewer">Viewer (Người xem)</option>
-                      </select>
-                    </div>
-                    <button
-                      type="submit"
-                      style={{ ...styles.submitBtn, width: '100%', marginTop: '0.25rem' }}
-                    >
-                      Thêm thành viên
-                    </button>
-                  </form>
-                </div>
-
-                {/* Member List Table */}
-                <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.75rem' }}>Danh Sách Thành Viên</h4>
-                  {membersList.length === 0 ? (
-                    <div style={styles.emptyState}>
-                      <p>Không có thông tin thành viên.</p>
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', textAlign: 'left' }}>
-                            <th style={{ padding: '0.5rem' }}>Email</th>
-                            <th style={{ padding: '0.5rem' }}>Vai trò</th>
-                            <th style={{ padding: '0.5rem' }}>Trạng thái</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {membersList.map((mem: any) => (
-                            <tr key={mem.membershipId || mem.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.02)' }}>
-                              <td style={{ padding: '0.5rem', color: 'var(--text-primary)' }}>{mem.user?.email || mem.user?.id || mem.userId}</td>
-                              <td style={{ padding: '0.5rem', textTransform: 'uppercase', color: 'var(--accent-primary)', fontSize: '0.75rem' }}>{mem.role}</td>
-                              <td style={{ padding: '0.5rem' }}>
-                                <span style={{
-                                  background: 'rgba(16, 185, 129, 0.1)',
-                                  color: 'var(--accent-green)',
-                                  padding: '0.05rem 0.25rem',
-                                  borderRadius: '3px',
-                                  fontSize: '0.65rem'
-                                }}>
-                                  ACTIVE
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -4705,76 +1989,28 @@ export default function Page() {
 
         {/* Report Preview Modal */}
         {selectedReport && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.75)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2rem'
-          }}>
-            <div className="glass-card" style={{
-              background: '#0d111a',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '12px',
-              width: '100%',
-              maxWidth: '850px',
-              maxHeight: '90vh',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
-              overflow: 'hidden'
-            }}>
+          <div className="modal-overlay modal-overlay--padded">
+            <div className="glass-card modal-box modal-box--report-preview">
               {/* Header */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '1.25rem 1.5rem',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
-              }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div className="modal-header">
+                <h3 className="modal-title">
                   Bản xem trước Báo cáo: {selectedReport.title}
                 </h3>
                 <button
                   onClick={() => setSelectedReport(null)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    fontSize: '1.2rem'
-                  }}
+                  className="modal-close-btn"
                 >
                   ✕
                 </button>
               </div>
 
               {/* Preview Content */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '1.5rem',
-                background: '#ffffff',
-                color: '#333333'
-              }}>
+              <div className="modal-body modal-body--report">
                 <div dangerouslySetInnerHTML={{ __html: selectedReport.metadata?.renderedHtml || '<p>Không có nội dung báo cáo</p>' }} />
               </div>
 
               {/* Footer */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '1rem',
-                padding: '1rem 1.5rem',
-                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-                background: 'rgba(255, 255, 255, 0.01)'
-              }}>
+              <div className="modal-footer">
                 <button
                   onClick={() => {
                     const printWindow = window.open('', '_blank');
@@ -4785,28 +2021,13 @@ export default function Page() {
                       printWindow.print();
                     }
                   }}
-                  style={{
-                    background: 'var(--accent-primary)',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '6px',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
+                  className="modal-btn-primary"
                 >
                   In / Xuất PDF
                 </button>
                 <button
                   onClick={() => setSelectedReport(null)}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '6px',
-                    cursor: 'pointer'
-                  }}
+                  className="modal-btn-secondary"
                 >
                   Đóng
                 </button>
@@ -4817,73 +2038,38 @@ export default function Page() {
 
         {/* Recommendation Detail Modal */}
         {selectedRecForDetail && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.75)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2rem'
-          }}>
-            <div className="glass-card" style={{
-              background: '#0d111a',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '12px',
-              width: '100%',
-              maxWidth: '600px',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)',
-              padding: '1.5rem'
-            }}>
+          <div className="modal-overlay modal-overlay--padded">
+            <div className="glass-card modal-box modal-box--rec-detail">
               {/* Header */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '1rem',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-                paddingBottom: '0.75rem'
-              }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div className="modal-header">
+                <h3 className="modal-title">
                   Chi tiết Kiến nghị & Phân công
                 </h3>
                 <button
                   onClick={() => setSelectedRecForDetail(null)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    fontSize: '1.2rem'
-                  }}
+                  className="modal-close-btn"
                 >
                   ✕
                 </button>
               </div>
 
               {/* Rec info */}
-              <div style={{ marginBottom: '1.25rem' }}>
-                <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--accent-secondary)', marginBottom: '0.4rem' }}>
+              <div className="modal-rec-info">
+                <h4 className="modal-rec-info__title">
                   {selectedRecForDetail.title}
                 </h4>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <p className="modal-rec-info__desc">
                   {selectedRecForDetail.description}
                 </p>
               </div>
 
               {/* Assignee selection */}
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={styles.formLabel}>Người phụ trách (Assignee)</label>
+              <div className="modal-form-group">
+                <label className="jss-form-label">Người phụ trách (Assignee)</label>
                 <select
                   value={recAssigneeId}
                   onChange={e => setRecAssigneeId(e.target.value)}
-                  style={styles.formInput}
+                  className="dashboard-form__input"
                 >
                   <option value="">-- Chưa phân công --</option>
                   {membersList.map((mem: any) => (
@@ -4895,65 +2081,46 @@ export default function Page() {
               </div>
 
               {/* Notes: Internal Notes & Client Notes */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div className="modal-form-group modal-form-group--notes">
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <label style={{ ...styles.formLabel, marginBottom: 0 }}>Ghi chú nội bộ (Internal Notes)</label>
-                    <span style={{ fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontWeight: 700 }}>CHỈ NỘI BỘ AGENCY</span>
+                  <div className="modal-form-group__header">
+                    <label className="jss-form-label jss-form-label--no-margin">Ghi chú nội bộ (Internal Notes)</label>
+                    <span className="modal-form-group__badge modal-form-group__badge--internal">CHỈ NỘI BỘ AGENCY</span>
                   </div>
                   <textarea
                     value={recInternalNotes}
                     onChange={e => setRecInternalNotes(e.target.value)}
                     placeholder="Nhập ghi chú kỹ thuật, lưu ý nội bộ công việc..."
-                    style={{ ...styles.formInput, minHeight: '80px', fontFamily: 'inherit' }}
+                    className="dashboard-form__input"
                   />
                 </div>
 
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                    <label style={{ ...styles.formLabel, marginBottom: 0 }}>Ghi chú gửi khách hàng (Client Notes)</label>
-                    <span style={{ fontSize: '0.65rem', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent-green)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontWeight: 700 }}>KHÁCH HÀNG CÓ THỂ XEM</span>
+                  <div className="modal-form-group__header">
+                    <label className="jss-form-label jss-form-label--no-margin">Ghi chú gửi khách hàng (Client Notes)</label>
+                    <span className="modal-form-group__badge modal-form-group__badge--client">KHÁCH HÀNG CÓ THỂ XEM</span>
                   </div>
                   <textarea
                     value={recClientNotes}
                     onChange={e => setRecClientNotes(e.target.value)}
                     placeholder="Giải thích cho khách hàng về lỗi này và cách xử lý..."
-                    style={{ ...styles.formInput, minHeight: '80px', fontFamily: 'inherit' }}
+                    className="dashboard-form__input"
                   />
                 </div>
               </div>
 
               {/* Action buttons */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '0.75rem',
-                borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-                paddingTop: '1rem'
-              }}>
+              <div className="modal-footer modal-footer--bordered">
                 <button
                   onClick={() => setSelectedRecForDetail(null)}
-                  style={{
-                    background: 'transparent',
-                    color: 'var(--text-primary)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
-                  }}
+                  className="modal-btn-secondary"
                 >
                   Hủy
                 </button>
                 <button
                   onClick={handleSaveRecDetail}
                   disabled={isSavingRecDetail}
-                  style={{
-                    ...styles.submitBtn,
-                    marginTop: 0,
-                    padding: '0.5rem 1rem',
-                    fontSize: '0.85rem'
-                  }}
+                  className="modal-btn-primary"
                 >
                   {isSavingRecDetail ? 'Đang lưu...' : 'Lưu Thay Đổi'}
                 </button>
@@ -4964,70 +2131,32 @@ export default function Page() {
 
         {/* HTML Viewer Modal */}
         {viewingRawHtmlJobRunId && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: 99999,
-            padding: '2rem'
-          }}>
-            <div className="glass-card" style={{
-              width: '100%',
-              maxWidth: '900px',
-              height: '80vh',
-              maxHeight: '900px',
-              display: 'flex',
-              flexDirection: 'column',
-              padding: '1.5rem',
-              background: '#0d111a',
-              border: '1px solid rgba(255,255,255,0.1)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Nguồn HTML thô (Raw Web Content)</h3>
+          <div className="modal-overlay modal-overlay--padded">
+            <div className="glass-card modal-box modal-box--html-viewer">
+              <div className="modal-header">
+                <h3 className="modal-title">Nguồn HTML thô (Raw Web Content)</h3>
                 <button
                   onClick={() => setViewingRawHtmlJobRunId(null)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-muted)',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '1.2rem'
-                  }}
+                  className="modal-close-btn"
                 >
                   ✕
                 </button>
               </div>
               
-              <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.8rem', color: '#eaeaea', whiteSpace: 'pre-wrap' }}>
+              <div className="modal-body modal-body--html-viewer">
                 {loadingRawHtml ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                    <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-primary)' }} />
+                  <div className="modal-loader-wrap">
+                    <Loader2 size={32} className="modal-loader-icon" />
                   </div>
                 ) : (
                   rawHtmlContent || 'Không có nội dung HTML'
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <div className="modal-footer">
                 <button
                   onClick={() => setViewingRawHtmlJobRunId(null)}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
-                  }}
+                  className="modal-btn-secondary"
                 >
                   Đóng
                 </button>
@@ -5039,651 +2168,3 @@ export default function Page() {
     </main>
   );
 }
-
-// Styling Object
-const styles: Record<string, React.CSSProperties> = {
-  sidebar: {
-    width: '260px',
-    backgroundColor: '#0a0d16',
-    borderRight: '1px solid rgba(255, 255, 255, 0.05)',
-    display: 'flex',
-    flexDirection: 'column',
-    position: 'sticky',
-    top: 0,
-    height: '100vh',
-    padding: '1.5rem 1rem'
-  },
-  logoContainer: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    padding: '0.5rem',
-    marginBottom: '2rem'
-  },
-  logoGlow: {
-    position: 'absolute',
-    left: '-10px',
-    width: '40px',
-    height: '40px',
-    background: 'radial-gradient(circle, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0) 70%)',
-    pointerEvents: 'none'
-  },
-  logoText: {
-    fontSize: '1.5rem',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    fontFamily: 'var(--font-outfit)',
-    letterSpacing: '-0.03em'
-  },
-  siteSelectorContainer: {
-    marginBottom: '2rem'
-  },
-  siteSelectorCard: {
-    display: 'flex',
-    alignItems: 'center',
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    borderRadius: 'var(--radius-md)',
-    padding: '0.6rem 0.8rem',
-    gap: '0.5rem'
-  },
-  selectInput: {
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-primary)',
-    fontSize: '0.85rem',
-    fontWeight: 500,
-    outline: 'none',
-    cursor: 'pointer',
-    appearance: 'none',
-    WebkitAppearance: 'none'
-  },
-  navMenu: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.35rem',
-    flex: 1
-  },
-  navItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-secondary)',
-    padding: '0.7rem 0.8rem',
-    borderRadius: 'var(--radius-md)',
-    cursor: 'pointer',
-    fontSize: '0.9rem',
-    fontWeight: 500,
-    textAlign: 'left',
-    position: 'relative',
-    transition: 'all 0.2s ease'
-  },
-  navItemActive: {
-    background: 'rgba(99, 102, 241, 0.08)',
-    color: 'var(--accent-primary)'
-  },
-  activeDot: {
-    position: 'absolute',
-    left: 0,
-    width: '4px',
-    height: '16px',
-    backgroundColor: 'var(--accent-primary)',
-    borderRadius: '0 4px 4px 0'
-  },
-  userCardContainer: {
-    marginTop: 'auto',
-    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-    paddingTop: '1rem'
-  },
-  userCard: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-    padding: '0.5rem'
-  },
-  avatar: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    background: 'rgba(99, 102, 241, 0.2)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '1px solid rgba(99, 102, 241, 0.4)'
-  },
-  userInfo: {
-    overflow: 'hidden'
-  },
-  userName: {
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    color: 'var(--text-primary)',
-    whiteSpace: 'nowrap',
-    textOverflow: 'ellipsis'
-  },
-  userRole: {
-    fontSize: '0.75rem',
-    color: 'var(--text-muted)'
-  },
-  mainContent: {
-    flex: 1,
-    padding: '2rem',
-    overflowY: 'auto',
-    height: '100vh'
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '2rem'
-  },
-  headerTitle: {
-    fontSize: '1.85rem',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    marginBottom: '0.25rem'
-  },
-  headerSubtitle: {
-    fontSize: '0.9rem',
-    color: 'var(--text-secondary)'
-  },
-  headerActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  iconButton: {
-    position: 'relative',
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    borderRadius: 'var(--radius-md)',
-    padding: '0.6rem',
-    color: 'var(--text-secondary)',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.2s ease'
-  },
-  notificationBadge: {
-    position: 'absolute',
-    top: '6px',
-    right: '6px',
-    width: '6px',
-    height: '6px',
-    borderRadius: '50%',
-    backgroundColor: 'var(--accent-secondary)'
-  },
-  divider: {
-    width: '1px',
-    height: '24px',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)'
-  },
-  actionButton: {
-    background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%)',
-    border: 'none',
-    borderRadius: 'var(--radius-md)',
-    color: 'white',
-    padding: '0.6rem 1rem',
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
-    transition: 'transform 0.2s ease'
-  },
-  metricsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '1.25rem',
-    marginBottom: '2rem'
-  },
-  metricCard: {
-    padding: '1.25rem'
-  },
-  metricHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '0.75rem'
-  },
-  metricLabel: {
-    fontSize: '0.85rem',
-    color: 'var(--text-secondary)',
-    fontWeight: 500
-  },
-  metricIconWrap: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '8px',
-    background: 'rgba(99, 102, 241, 0.08)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  metricBody: {
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'space-between'
-  },
-  metricValue: {
-    fontSize: '1.75rem',
-    fontWeight: 700,
-    color: 'var(--text-primary)',
-    fontFamily: 'var(--font-outfit)'
-  },
-  metricChange: {
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    display: 'flex',
-    alignItems: 'center'
-  },
-  chartCard: {
-    padding: '1.5rem',
-    marginBottom: '2rem'
-  },
-  chartHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '1.5rem'
-  },
-  cardTitle: {
-    fontSize: '1.15rem',
-    fontWeight: 600,
-    color: 'var(--text-primary)',
-    marginBottom: '0.25rem'
-  },
-  cardSubtitle: {
-    fontSize: '0.85rem',
-    color: 'var(--text-secondary)'
-  },
-  chartPeriod: {
-    display: 'flex',
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    borderRadius: '8px',
-    padding: '0.2rem'
-  },
-  periodBtnActive: {
-    background: 'rgba(255, 255, 255, 0.08)',
-    border: 'none',
-    borderRadius: '6px',
-    color: 'var(--text-primary)',
-    padding: '0.4rem 0.75rem',
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    cursor: 'pointer'
-  },
-  periodBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-secondary)',
-    padding: '0.4rem 0.75rem',
-    fontSize: '0.75rem',
-    fontWeight: 500,
-    cursor: 'pointer'
-  },
-  chartWrapper: {
-    width: '100%',
-    height: '240px'
-  },
-  chartSvg: {
-    width: '100%',
-    height: '100%'
-  },
-  chartLegends: {
-    display: 'flex',
-    gap: '1.5rem',
-    marginTop: '1rem',
-    paddingLeft: '1rem'
-  },
-  legendItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    fontSize: '0.8rem',
-    color: 'var(--text-secondary)'
-  },
-  legendDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%'
-  },
-  detailsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
-    gap: '1.5rem'
-  },
-  keywordsCard: {
-    padding: '1.5rem'
-  },
-  tableWrapper: {
-    overflowX: 'auto',
-    marginTop: '1.25rem'
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    textAlign: 'left'
-  },
-  trHead: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
-  },
-  th: {
-    padding: '0.75rem 0.5rem',
-    fontSize: '0.75rem',
-    textTransform: 'uppercase',
-    color: 'var(--text-secondary)',
-    fontWeight: 600,
-    letterSpacing: '0.05em'
-  },
-  trBody: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-    transition: 'background 0.2s ease'
-  },
-  tdKeyword: {
-    padding: '1rem 0.5rem',
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    color: 'var(--text-primary)'
-  },
-  td: {
-    padding: '1rem 0.5rem',
-    fontSize: '0.85rem',
-    color: 'var(--text-secondary)'
-  },
-  badgePosition: {
-    background: 'rgba(99, 102, 241, 0.1)',
-    color: 'var(--accent-primary)',
-    padding: '0.2rem 0.5rem',
-    borderRadius: '6px',
-    fontSize: '0.8rem',
-    fontWeight: 600
-  },
-  actionsCard: {
-    padding: '1.5rem'
-  },
-  actionList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    marginTop: '1.25rem'
-  },
-  actionItem: {
-    display: 'flex',
-    background: 'rgba(255, 255, 255, 0.02)',
-    border: '1px solid rgba(255, 255, 255, 0.04)',
-    borderRadius: 'var(--radius-md)',
-    overflow: 'hidden',
-    transition: 'all 0.2s ease'
-  },
-  actionLeftIndicator: {
-    width: '4px'
-  },
-  actionBody: {
-    padding: '1rem',
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.5rem'
-  },
-  actionHeaderRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '1rem'
-  },
-  actionTitle: {
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    color: 'var(--text-primary)'
-  },
-  badgeImpact: {
-    fontSize: '0.7rem',
-    fontWeight: 600,
-    padding: '0.15rem 0.4rem',
-    borderRadius: '4px',
-    border: '1px solid'
-  },
-  actionDesc: {
-    fontSize: '0.8rem',
-    color: 'var(--text-secondary)',
-    lineHeight: 1.4
-  },
-  actionFooterRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: '0.25rem'
-  },
-  actionTypeTag: {
-    fontSize: '0.75rem',
-    color: 'var(--text-muted)',
-    background: 'rgba(255, 255, 255, 0.04)',
-    padding: '0.15rem 0.45rem',
-    borderRadius: '4px'
-  },
-  actionBtnOptimize: {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--accent-primary)',
-    cursor: 'pointer',
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.25rem',
-    padding: '0.2rem 0.5rem',
-    borderRadius: '4px',
-    transition: 'background 0.2s ease'
-  },
-  subTabContainer: {
-    display: 'flex',
-    gap: '0.75rem',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-    paddingBottom: '0.75rem',
-    marginBottom: '1rem',
-  },
-  subTabButton: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-secondary)',
-    padding: '0.5rem 1rem',
-    borderRadius: 'var(--radius-sm)',
-    cursor: 'pointer',
-    fontSize: '0.85rem',
-    fontWeight: 500,
-    transition: 'all 0.2s ease',
-  },
-  subTabButtonActive: {
-    background: 'rgba(99, 102, 241, 0.1)',
-    color: 'var(--accent-primary)',
-    fontWeight: 600,
-  },
-  contentPlannerGrid: {
-    display: 'flex',
-    gap: '1.5rem',
-    alignItems: 'flex-start',
-    width: '100%',
-  },
-  emptyState: {
-    padding: '2rem',
-    textAlign: 'center',
-    color: 'var(--text-muted)',
-    fontSize: '0.9rem',
-    background: 'rgba(255, 255, 255, 0.01)',
-    borderRadius: 'var(--radius-md)',
-    border: '1px dashed rgba(255, 255, 255, 0.05)',
-  },
-  planCard: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    background: 'rgba(255, 255, 255, 0.02)',
-    border: '1px solid rgba(255, 255, 255, 0.04)',
-    borderRadius: 'var(--radius-md)',
-    padding: '1rem',
-    transition: 'all 0.2s ease',
-  },
-  statusBadge: {
-    fontSize: '0.75rem',
-    padding: '0.15rem 0.45rem',
-    borderRadius: '6px',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-  },
-  openEditorBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.25rem',
-    background: 'rgba(99, 102, 241, 0.1)',
-    color: 'var(--accent-primary)',
-    border: 'none',
-    padding: '0.5rem 0.75rem',
-    borderRadius: 'var(--radius-sm)',
-    cursor: 'pointer',
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    transition: 'all 0.2s ease',
-  },
-  keywordTagPrimary: {
-    background: 'rgba(99, 102, 241, 0.15)',
-    color: 'var(--accent-primary)',
-    fontSize: '0.75rem',
-    padding: '0.15rem 0.45rem',
-    borderRadius: '4px',
-    fontWeight: 500,
-  },
-  keywordTagSecondary: {
-    background: 'rgba(255, 255, 255, 0.04)',
-    color: 'var(--text-secondary)',
-    fontSize: '0.75rem',
-    padding: '0.15rem 0.45rem',
-    borderRadius: '4px',
-  },
-  formLabel: {
-    display: 'block',
-    fontSize: '0.8rem',
-    color: 'var(--text-secondary)',
-    marginBottom: '0.35rem',
-    fontWeight: 500,
-  },
-  formInput: {
-    width: '100%',
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    borderRadius: 'var(--radius-sm)',
-    padding: '0.5rem 0.75rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.85rem',
-    outline: 'none',
-    transition: 'border-color 0.2s ease',
-  },
-  formSelect: {
-    width: '100%',
-    background: 'rgba(18, 24, 41, 0.95)',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    borderRadius: 'var(--radius-sm)',
-    padding: '0.5rem 0.75rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.85rem',
-    outline: 'none',
-    cursor: 'pointer',
-  },
-  submitBtn: {
-    background: 'var(--accent-primary)',
-    color: 'white',
-    border: 'none',
-    borderRadius: 'var(--radius-sm)',
-    padding: '0.6rem',
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '0.5rem',
-    cursor: 'pointer',
-    marginTop: '0.5rem',
-    transition: 'all 0.2s ease',
-  },
-  topicClusterCard: {
-    background: 'rgba(255, 255, 255, 0.02)',
-    border: '1px solid rgba(255, 255, 255, 0.04)',
-    borderRadius: 'var(--radius-md)',
-    padding: '1.25rem',
-  },
-  topicKeywordTag: {
-    background: 'rgba(99, 102, 241, 0.1)',
-    color: 'var(--accent-primary)',
-    fontSize: '0.7rem',
-    padding: '0.1rem 0.35rem',
-    borderRadius: '4px',
-  },
-  topicKeywordTagSecondary: {
-    background: 'rgba(168, 85, 247, 0.1)',
-    color: 'var(--accent-secondary)',
-    fontSize: '0.7rem',
-    padding: '0.1rem 0.35rem',
-    borderRadius: '4px',
-  },
-  editorWorkspaceGrid: {
-    display: 'grid',
-    gridTemplateColumns: '320px 1fr 300px',
-    gap: '1.25rem',
-    width: '100%',
-    alignItems: 'stretch',
-    flex: 1,
-    minHeight: '0',
-  },
-  editorColBrief: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    overflowY: 'auto',
-    maxHeight: 'calc(100vh - 200px)',
-  },
-  editorColMain: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-  },
-  editorColSidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1rem',
-    overflowY: 'auto',
-    maxHeight: 'calc(100vh - 200px)',
-  },
-  editorTextArea: {
-    flex: 1,
-    width: '100%',
-    minHeight: '400px',
-    background: 'rgba(255, 255, 255, 0.02)',
-    border: '1px solid rgba(255, 255, 255, 0.05)',
-    borderRadius: 'var(--radius-md)',
-    padding: '1rem',
-    color: 'var(--text-primary)',
-    fontFamily: 'monospace',
-    fontSize: '0.9rem',
-    lineHeight: 1.6,
-    outline: 'none',
-    resize: 'none',
-  },
-  suggestionItem: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: '0.5rem',
-    fontSize: '0.8rem',
-    color: 'var(--text-secondary)',
-    lineHeight: 1.4,
-  }
-};

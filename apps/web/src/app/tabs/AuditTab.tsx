@@ -1,6 +1,7 @@
 import React from 'react';
 import { Loader2, Search, Activity, Globe, AlertCircle, ChevronRight, FileText } from 'lucide-react';
 import { renderProvenanceBadge } from '../styles';
+import TechnicalDetailsModal from '../components/TechnicalDetailsModal';
 
 interface AuditTabProps {
   selectedSite: string;
@@ -41,7 +42,13 @@ export default function AuditTab({
   setRecInternalNotes,
   setRecClientNotes,
 }: AuditTabProps) {
+  const [selectedDetailsJobRunId, setSelectedDetailsJobRunId] = React.useState<string | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = React.useState(false);
   
+  const apiCtx = typeof window !== 'undefined' ? (window as any)._apiCtx || {} : {};
+  const token = apiCtx.token || (typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null);
+  const workspaceId = apiCtx.workspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('workspaceId') : null);
+
   const getPriorityDetails = (priority: string) => {
     switch (priority) {
       case 'high':
@@ -281,24 +288,47 @@ export default function AuditTab({
                             </button>
                           )}
                           {run.state === 'completed' && (
-                            <button
-                              onClick={() => handleViewRawHtml(run.id)}
-                              style={{
-                                background: 'rgba(255,255,255,0.06)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '4px',
-                                padding: '0.3rem 0.6rem',
-                                color: 'var(--text-primary)',
-                                cursor: 'pointer',
-                                fontSize: '0.75rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.2rem'
-                              }}
-                            >
-                              <FileText size={12} />
-                              <span>HTML</span>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  setSelectedDetailsJobRunId(run.id);
+                                  setIsDetailsModalOpen(true);
+                                }}
+                                style={{
+                                  background: 'rgba(99, 102, 241, 0.15)',
+                                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                                  borderRadius: '4px',
+                                  padding: '0.3rem 0.6rem',
+                                  color: 'rgb(243, 244, 246)',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem'
+                                }}
+                              >
+                                <Activity size={12} color="var(--accent-primary)" />
+                                <span>Chi tiết kĩ thuật</span>
+                              </button>
+                              <button
+                                onClick={() => handleViewRawHtml(run.id)}
+                                style={{
+                                  background: 'rgba(255,255,255,0.06)',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  borderRadius: '4px',
+                                  padding: '0.3rem 0.6rem',
+                                  color: 'var(--text-primary)',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem'
+                                }}
+                              >
+                                <FileText size={12} />
+                                <span>HTML</span>
+                              </button>
+                            </>
                           )}
                           {(run.state === 'completed' || run.state === 'failed') && (
                             <button
@@ -378,6 +408,21 @@ export default function AuditTab({
           )}
         </div>
       </div>
+
+      {isDetailsModalOpen && selectedDetailsJobRunId && activeSite && (
+        <TechnicalDetailsModal
+          isOpen={isDetailsModalOpen}
+          onClose={() => {
+            setIsDetailsModalOpen(false);
+            setSelectedDetailsJobRunId(null);
+          }}
+          jobRunId={selectedDetailsJobRunId}
+          siteId={activeSite.id}
+          siteDomain={activeSite.domain}
+          token={token}
+          workspaceId={workspaceId}
+        />
+      )}
     </div>
   );
 }

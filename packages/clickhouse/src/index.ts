@@ -162,18 +162,181 @@ class MockClickHouseClient {
       }));
     } else if (q.includes('crawl_page_observations')) {
       const allRows = dbData['crawl_page_observations'] || [];
+      const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
       if (q.includes('job_run_id') && q.includes('order by timestamp desc')) {
         const ordered = [...allRows].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         rows = ordered.slice(0, 1);
       } else if (q.includes('count()') && q.includes('status_code = 200')) {
-        const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
         const filtered = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
         const total = filtered.length;
         const with_issues = filtered.filter(r => r.issues && r.issues.length > 0).length;
         const success = filtered.filter(r => r.status_code === 200).length;
         rows = [{ total, success, with_issues }];
       } else {
-        rows = allRows;
+        rows = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
+      }
+
+      if (rows.length === 0 && jobRunIdMatch) {
+        const jobRunId = jobRunIdMatch[1];
+        const siteIdMatch = params.query.match(/site_id\s*=\s*'([\w-]+)'/);
+        const siteId = siteIdMatch ? siteIdMatch[1] : 'mock-site-id';
+        rows = [
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            url: `https://mocksite.test/`,
+            status_code: 200,
+            title: 'Mock Website Homepage',
+            meta_description: '',
+            load_time_ms: 350,
+            page_size_bytes: 12500,
+            word_count: 520,
+            issues: ['missing_meta_description'],
+            canonical_url: 'https://mocksite.test/',
+            redirect_chain: [],
+            redirect_status_codes: [],
+            robots_meta: 'index, follow',
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            ingested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            schema_version: 'v1',
+            algorithm_version: 'v1.2.0-baseline',
+            source_origin: 'crawler',
+          },
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            url: `https://mocksite.test/old-home`,
+            status_code: 301,
+            title: '',
+            meta_description: '',
+            load_time_ms: 120,
+            page_size_bytes: 0,
+            word_count: 0,
+            issues: [],
+            canonical_url: '',
+            redirect_chain: [`https://mocksite.test/`],
+            redirect_status_codes: [301],
+            robots_meta: '',
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            ingested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            schema_version: 'v1',
+            algorithm_version: 'v1.2.0-baseline',
+            source_origin: 'crawler',
+          },
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            url: `https://mocksite.test/broken-page`,
+            status_code: 404,
+            title: '404 Not Found',
+            meta_description: '',
+            load_time_ms: 180,
+            page_size_bytes: 850,
+            word_count: 12,
+            issues: ['error_status_code'],
+            canonical_url: '',
+            redirect_chain: [],
+            redirect_status_codes: [],
+            robots_meta: 'noindex, nofollow',
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            ingested_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            schema_version: 'v1',
+            algorithm_version: 'v1.2.0-baseline',
+            source_origin: 'crawler',
+          }
+        ];
+      }
+    } else if (q.includes('sitemap_observations')) {
+      const allRows = dbData['sitemap_observations'] || [];
+      const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
+      rows = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
+
+      if (rows.length === 0 && jobRunIdMatch) {
+        const jobRunId = jobRunIdMatch[1];
+        const siteIdMatch = params.query.match(/site_id\s*=\s*'([\w-]+)'/);
+        const siteId = siteIdMatch ? siteIdMatch[1] : 'mock-site-id';
+        rows = [
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            sitemap_url: `https://mocksite.test/sitemap.xml`,
+            crawled_url: `https://mocksite.test/`,
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          },
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            sitemap_url: `https://mocksite.test/sitemap.xml`,
+            crawled_url: `https://mocksite.test/about`,
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          },
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            sitemap_url: `https://mocksite.test/sitemap.xml`,
+            crawled_url: `https://mocksite.test/contact`,
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          }
+        ];
+      }
+    } else if (q.includes('render_observations')) {
+      const allRows = dbData['render_observations'] || [];
+      const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
+      rows = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
+
+      if (rows.length === 0 && jobRunIdMatch) {
+        const jobRunId = jobRunIdMatch[1];
+        const siteIdMatch = params.query.match(/site_id\s*=\s*'([\w-]+)'/);
+        const siteId = siteIdMatch ? siteIdMatch[1] : 'mock-site-id';
+        rows = [
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            url: `https://mocksite.test/`,
+            dynamic_html_length: 12500,
+            console_errors: ['Failed to load resource: net::ERR_CONNECTION_REFUSED at https://mocksite.test/unused.js'],
+            screenshot_s3_key: `raw/screenshots/mock-ws/mock-site/mock-key/mock-homepage.png`,
+            title_mismatch: 0,
+            text_parity_percent: 98.5,
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          }
+        ];
+      }
+    } else if (q.includes('pagespeed_observations')) {
+      const allRows = dbData['pagespeed_observations'] || [];
+      const jobRunIdMatch = params.query.match(/job_run_id\s*=\s*'([\w-]+)'/);
+      rows = jobRunIdMatch ? allRows.filter(r => r.job_run_id === jobRunIdMatch[1]) : allRows;
+
+      if (rows.length === 0 && jobRunIdMatch) {
+        const jobRunId = jobRunIdMatch[1];
+        const siteIdMatch = params.query.match(/site_id\s*=\s*'([\w-]+)'/);
+        const siteId = siteIdMatch ? siteIdMatch[1] : 'mock-site-id';
+        rows = [
+          {
+            timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            site_id: siteId,
+            url: `https://mocksite.test/`,
+            device: 'mobile',
+            fcp_ms: 1200,
+            lcp_ms: 2400,
+            cls: 0.05,
+            fid_ms: 80,
+            inp_ms: 150,
+            performance_score: 85,
+            accessibility_score: 92,
+            best_practices_score: 89,
+            seo_score: 95,
+            job_run_id: jobRunId,
+            observed_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+          }
+        ];
       }
     } else if (q.includes('gsc_page_daily')) {
       const allRows = dbData['gsc_page_daily'] || [];

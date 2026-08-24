@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Param, UseGuards, BadRequestException, StreamableFile, Res } from '@nestjs/common';
 import { SitesService } from './sites.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantGuard } from '../tenancy/tenant.guard';
@@ -97,5 +97,36 @@ export class SitesController {
     @Param('jobRunId') jobRunId: string,
   ) {
     return this.sitesService.getCrawlRawHtml(workspaceId, siteId, jobRunId);
+  }
+
+  @Get(':siteId/crawls/:jobRunId/technical-details')
+  @AuditLog('site.crawl_technical_details.read', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async getCrawlTechnicalDetails(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+    @Param('jobRunId') jobRunId: string,
+  ) {
+    return this.sitesService.getCrawlTechnicalDetails(workspaceId, siteId, jobRunId);
+  }
+
+  @Get(':siteId/crawls/:jobRunId/screenshot')
+  @AuditLog('site.crawl_screenshot.read', 'site')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager', 'seo')
+  async getCrawlScreenshotStream(
+    @CurrentWorkspace() workspaceId: string,
+    @Param('siteId') siteId: string,
+    @Param('jobRunId') jobRunId: string,
+    @Query('url') url: string,
+    @Res({ passthrough: true }) res: any,
+  ) {
+    if (!url) {
+      throw new BadRequestException('url query parameter is required');
+    }
+    const stream = await this.sitesService.getCrawlScreenshotStream(workspaceId, siteId, jobRunId, url);
+    res.header('Content-Type', 'image/png');
+    return new StreamableFile(stream as any);
   }
 }

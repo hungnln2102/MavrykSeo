@@ -219,7 +219,12 @@ axios.post = async (url, data, config) => {
   return originalPost(url, data, config);
 };
 
-const { DetectorProcessor } = require('./dist/detector.processor');
+let DetectorProcessor;
+try {
+  DetectorProcessor = require('./src/detector.processor').DetectorProcessor;
+} catch (e) {
+  DetectorProcessor = require('./dist/detector.processor').DetectorProcessor;
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

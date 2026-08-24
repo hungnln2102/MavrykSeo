@@ -7,7 +7,7 @@ const mockQueueAdd = jest.fn();
 
 jest.mock('@seo/db', () => ({
   db: { select: jest.fn(), insert: jest.fn(), update: jest.fn() },
-  jobRuns: { id: 'job_runs.id', workspaceId: 'job_runs.workspaceId', projectId: 'job_runs.projectId', queueName: 'job_runs.queueName', state: 'job_runs.state', idempotencyKey: 'job_runs.idempotencyKey' },
+  jobRuns: { id: 'job_runs.id', workspaceId: 'job_runs.workspaceId', projectId: 'job_runs.projectId', queueName: 'job_runs.queueName', state: 'job_runs.state', idempotencyKey: 'job_runs.idempotencyKey', ingestionKey: 'job_runs.ingestionKey' },
   projects: { id: 'projects.id', workspaceId: 'projects.workspaceId', crawlEnabled: 'projects.crawlEnabled', crawlMaxConcurrentJobs: 'projects.crawlMaxConcurrentJobs' },
   sites: { id: 'sites.id', domain: 'sites.domain', projectId: 'sites.projectId', crawlScheduleMinutes: 'sites.crawlScheduleMinutes' },
   workspaces: { id: 'workspaces.id', crawlEnabled: 'workspaces.crawlEnabled', crawlMaxConcurrentJobs: 'workspaces.crawlMaxConcurrentJobs' },
@@ -22,6 +22,19 @@ jest.mock('drizzle-orm', () => ({
 
 jest.mock('bullmq', () => ({
   Queue: jest.fn().mockImplementation(() => ({ add: mockQueueAdd })),
+}));
+
+const mockClickhouseQuery = jest.fn();
+jest.mock('@seo/clickhouse', () => ({
+  clickhouse: {
+    query: (...args: any[]) => mockClickhouseQuery(...args),
+  },
+}));
+
+const mockS3Send = jest.fn();
+jest.mock('@aws-sdk/client-s3', () => ({
+  S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
+  GetObjectCommand: jest.fn().mockImplementation((args) => ({ type: 'GetObjectCommand', ...args })),
 }));
 
 const mockSelect = db.select as jest.Mock;
@@ -196,5 +209,165 @@ describe('SitesService tenant scoping', () => {
     });
 
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  describe('getCrawlTechnicalDetails', () => {
+    it('throws NotFoundException if site is not found in the workspace', async () => {
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([]) }),
+          }),
+        }),
+      });
+
+      await expect(service.getCrawlTechnicalDetails('workspace-1', 'site-1', 'job-run-1')).rejects.toThrow(
+        new NotFoundException('Site not found in this workspace'),
+      );
+    });
+
+    it('throws NotFoundException if crawl job run is not found in the workspace', async () => {
+      // site found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([{ projectId: 'project-1' }]) }),
+          }),
+        }),
+      });
+      // job run not found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: jest.fn().mockResolvedValue([]) }),
+        }),
+      });
+
+      await expect(service.getCrawlTechnicalDetails('workspace-1', 'site-1', 'job-run-1')).rejects.toThrow(
+        new NotFoundException('Crawl job run not found'),
+      );
+    });
+
+    it('successfully queries all 4 ClickHouse observation tables', async () => {
+      // site found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([{ projectId: 'project-1' }]) }),
+          }),
+        }),
+      });
+      // job run found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: jest.fn().mockResolvedValue([{ id: 'job-run-1', ingestionKey: 'ingest-key' }]) }),
+        }),
+      });
+
+      mockClickhouseQuery.mockResolvedValue({
+        json: jest.fn()
+          .mockResolvedValueOnce([{ url: 'url1', latest_status_code: 200 }]) // crawl page
+          .mockResolvedValueOnce([{ sitemap_url: 'sitemap-url', crawled_url: 'url1' }]) // sitemap
+          .mockResolvedValueOnce([{ url: 'url1', text_parity_percent: 95 }]) // render
+          .mockResolvedValueOnce([{ url: 'url1', performance_score: 90 }]), // pagespeed
+      });
+
+      const res = await service.getCrawlTechnicalDetails('workspace-1', 'site-1', 'job-run-1');
+      expect(res).toEqual({
+        crawlUrlObservations: [{ url: 'url1', latest_status_code: 200 }],
+        sitemapObservations: [{ sitemap_url: 'sitemap-url', crawled_url: 'url1' }],
+        renderObservations: [{ url: 'url1', text_parity_percent: 95 }],
+        pagespeedObservations: [{ url: 'url1', performance_score: 90 }],
+      });
+      expect(mockClickhouseQuery).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  describe('getCrawlScreenshotStream', () => {
+    it('throws NotFoundException if site is not found in workspace', async () => {
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([]) }),
+          }),
+        }),
+      });
+
+      await expect(service.getCrawlScreenshotStream('workspace-1', 'site-1', 'job-run-1', 'https://example.com')).rejects.toThrow(
+        new NotFoundException('Site not found in this workspace'),
+      );
+    });
+
+    it('throws NotFoundException if job run is not found in workspace', async () => {
+      // site found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([{ projectId: 'project-1' }]) }),
+          }),
+        }),
+      });
+      // job run not found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: jest.fn().mockResolvedValue([]) }),
+        }),
+      });
+
+      await expect(service.getCrawlScreenshotStream('workspace-1', 'site-1', 'job-run-1', 'https://example.com')).rejects.toThrow(
+        new NotFoundException('Crawl job run not found'),
+      );
+    });
+
+    it('returns response stream when S3 call succeeds', async () => {
+      // site found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([{ projectId: 'project-1' }]) }),
+          }),
+        }),
+      });
+      // job run found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: jest.fn().mockResolvedValue([{ ingestionKey: 'ingest-key' }]) }),
+        }),
+      });
+
+      const mockStream = { pipe: jest.fn() };
+      mockS3Send.mockResolvedValueOnce({ Body: mockStream });
+
+      const stream = await service.getCrawlScreenshotStream('workspace-1', 'site-1', 'job-run-1', 'https://example.com');
+      expect(stream).toBe(mockStream);
+      expect(mockS3Send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'GetObjectCommand',
+          Bucket: 'seo-platform-raw',
+        })
+      );
+    });
+
+    it('throws NotFoundException if S3 send throws error', async () => {
+      // site found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          innerJoin: () => ({
+            where: () => ({ limit: jest.fn().mockResolvedValue([{ projectId: 'project-1' }]) }),
+          }),
+        }),
+      });
+      // job run found
+      mockSelect.mockReturnValueOnce({
+        from: () => ({
+          where: () => ({ limit: jest.fn().mockResolvedValue([{ ingestionKey: 'ingest-key' }]) }),
+        }),
+      });
+
+      mockS3Send.mockRejectedValueOnce(new Error('S3 Connection Failed'));
+
+      await expect(service.getCrawlScreenshotStream('workspace-1', 'site-1', 'job-run-1', 'https://example.com')).rejects.toThrow(
+        new NotFoundException('Failed to retrieve screenshot from S3: S3 Connection Failed'),
+      );
+    });
   });
 });

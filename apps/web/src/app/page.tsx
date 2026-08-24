@@ -241,12 +241,47 @@ export default function Page() {
           throw new Error('No workspaces found for user');
         }
 
-        // Find test-workspace or fallback to first
-        const ws = workspaces.find((w: any) => w.slug === 'test-workspace') || workspaces[0];
-        const wsId = ws.id;
+        // Try to find a workspace that has a project with active GSC integration
+        let selectedWs = workspaces[0];
+        let selectedProjId: string | null = null;
+
+        for (const ws of workspaces) {
+          try {
+            const projRes = await fetch('http://localhost:3000/projects', {
+              headers: {
+                'Authorization': `Bearer ${jwtToken}`,
+                'x-workspace-id': ws.id,
+              },
+            });
+            if (!projRes.ok) continue;
+            const wsProjects = await projRes.json();
+            if (wsProjects.length === 0) continue;
+
+            // Check each project for active GSC integration
+            for (const proj of wsProjects) {
+              try {
+                const syncRes = await fetch(
+                  `http://localhost:3000/projects/${proj.id}/integrations/google-search-console/sync-status`,
+                  { headers: { 'Authorization': `Bearer ${jwtToken}`, 'x-workspace-id': ws.id } }
+                );
+                if (syncRes.ok) {
+                  const syncData = await syncRes.json();
+                  if (syncData.connectionStatus === 'active') {
+                    selectedWs = ws;
+                    selectedProjId = proj.id;
+                    break;
+                  }
+                }
+              } catch { /* skip */ }
+            }
+            if (selectedProjId) break;
+          } catch { /* skip */ }
+        }
+
+        const wsId = selectedWs.id;
         setWorkspaceId(wsId);
 
-        // 3. Fetch projects
+        // 3. Fetch projects for the selected workspace
         const projRes = await fetch('http://localhost:3000/projects', {
           headers: {
             'Authorization': `Bearer ${jwtToken}`,
@@ -263,7 +298,8 @@ export default function Page() {
           throw new Error('No projects found in workspace');
         }
 
-        const projId = projects[0].id;
+        // Use the project that had GSC, or fallback to first
+        const projId = selectedProjId || projects[0].id;
         setProjectId(projId);
 
         // 4. Fetch recommendations

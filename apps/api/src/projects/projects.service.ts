@@ -268,18 +268,30 @@ export class ProjectsService {
       }
     }
 
-    // Auto-sync from Google API if GSC integration is active but no data yet
-    if (countData === 0 && hasRealGscIntegration) {
-      console.log('GSC integration active but no ClickHouse data. Auto-syncing from Google API...');
+    // Auto-sync from Google API if GSC integration is active
+    // Always sync when a real integration exists — this clears stale mock data
+    if (hasRealGscIntegration) {
+      console.log(`[GSC-SYNC] Integration active for project=${projectId}, workspace=${workspaceId}. Starting inlineSyncGsc...`);
       try {
         const syncResult = await this.inlineSyncGsc(workspaceId, projectId);
+        console.log('[GSC-SYNC] inlineSyncGsc result:', JSON.stringify(syncResult));
         if (syncResult.synced) {
-          console.log(`Auto-sync completed: ${syncResult.queryRowsCount} query rows, ${syncResult.pageRowsCount} page rows`);
+          console.log(`[GSC-SYNC] Completed: ${syncResult.queryRowsCount} query rows, ${syncResult.pageRowsCount} page rows`);
+          // Re-count after sync to pick up fresh data
+          try {
+            const cntResult2 = await clickhouse.query({
+              query: `SELECT count() as cnt FROM ${clickhouseDb}.gsc_page_daily WHERE site_id IN (${siteIdsListStr})`,
+              format: 'JSONEachRow'
+            });
+            const cntRows2 = (await cntResult2.json()) as any[];
+            countData = Number(cntRows2[0]?.cnt || 0);
+            console.log(`[GSC-SYNC] After sync countData=${countData}`);
+          } catch { /* ignore */ }
         } else {
-          console.log('Auto-sync skipped:', syncResult.reason);
+          console.log('[GSC-SYNC] Skipped:', syncResult.reason);
         }
       } catch (err: any) {
-        console.error('Auto-sync failed:', err.message);
+        console.error('[GSC-SYNC] Failed:', err.message, err.stack);
       }
     }
 
@@ -489,7 +501,9 @@ export class ProjectsService {
     try {
       const { decryptToken } = await import('@seo/core');
       credentials = JSON.parse(decryptToken(integration.credentials));
-    } catch {
+      console.log(`[GSC-SYNC] Credentials decrypted. siteUrl=${credentials.siteUrl}, expiresAt=${credentials.expiresAt}, now=${Date.now()}, expired=${credentials.expiresAt < Date.now()}`);
+    } catch (err: any) {
+      console.error('[GSC-SYNC] Decrypt error:', err.message);
       return { synced: false, reason: 'Failed to decrypt GSC credentials' };
     }
 
@@ -513,7 +527,8 @@ export class ProjectsService {
         });
         const tokenData = await refreshRes.json() as any;
         if (!refreshRes.ok || !tokenData.access_token) {
-          return { synced: false, reason: 'Failed to refresh GSC access token' };
+          console.error('[GSC-SYNC] Token refresh failed. Status:', refreshRes.status, 'Response:', JSON.stringify(tokenData));
+          return { synced: false, reason: `Failed to refresh GSC access token: ${tokenData.error || 'unknown'} - ${tokenData.error_description || ''}` };
         }
         accessToken = tokenData.access_token;
         // Update stored credentials

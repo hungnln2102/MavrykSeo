@@ -1,0 +1,36 @@
+=== Starting E2E Verification for AI Service & SEO Detectors ===
+Starting Python FastAPI AI Service on port 8083...
+[FastAPI STDOUT]: OpenTelemetry instrumented successfully for FastAPI
+[FastAPI STDERR]: INFO:     Will watch for changes in these directories: ['E:\\Project\\MavrykSeo\\services\\ai']
+[FastAPI STDERR]: INFO:     Uvicorn running on http://0.0.0.0:8083 (Press CTRL+C to quit)
+INFO:     Started reloader process [28648] using StatReload
+FastAPI Health check status: { status: 'ok', service: 'ai' }
+Seeding PostgreSQL mock data...
+Test script crashed: AggregateError
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:5435
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 5435
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:5435
+        at createConnectionError (node:net:1678:14)
+        at afterConnectMultiple (node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 5435
+    }
+  ]
+}
+undefined
+E:\Project\MavrykSeo\services\worker:
+[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command failed with exit code 1: ts-node -r tsconfig-paths/register verify_ai_detectors.js

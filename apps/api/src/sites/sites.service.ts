@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { createJobEnvelope, CrawlJobData } from '@seo/core';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import * as crypto from 'crypto';
+import { clickhouse } from '@seo/clickhouse';
 
 @Injectable()
 export class SitesService {
@@ -441,5 +442,134 @@ export class SitesService {
       baseHtml,
       compareHtml,
     };
+  }
+
+  async getCrawlTechnicalDetails(workspaceId: string, siteId: string, jobRunId: string) {
+    // 1. Verify site belongs to workspace
+    const siteResult = await db
+      .select({ projectId: sites.projectId })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    // 2. Fetch the job run to ensure it fits workspace
+    const runResult = await db
+      .select({ id: jobRuns.id, ingestionKey: jobRuns.ingestionKey })
+      .from(jobRuns)
+      .where(and(
+        eq(jobRuns.id, jobRunId),
+        eq(jobRuns.workspaceId, workspaceId)
+      ))
+      .limit(1);
+
+    if (runResult.length === 0) {
+      throw new NotFoundException('Crawl job run not found');
+    }
+
+    const clickhouseDb = process.env.CLICKHOUSE_DB || 'seo_platform';
+
+    // 3. Query ClickHouse observations
+    let crawlUrlObservations: any[] = [];
+    let sitemapObservations: any[] = [];
+    let renderObservations: any[] = [];
+    let pagespeedObservations: any[] = [];
+
+    try {
+      const qCrawl = `SELECT * FROM ${clickhouseDb}.crawl_page_observations WHERE site_id = '${siteId}' AND job_run_id = '${jobRunId}' ORDER BY url`;
+      const resCrawl = await clickhouse.query({ query: qCrawl, format: 'JSONEachRow' });
+      crawlUrlObservations = await resCrawl.json();
+    } catch (err: any) {
+      console.error('Failed to query crawl_page_observations:', err.message);
+    }
+
+    try {
+      const qSitemap = `SELECT * FROM ${clickhouseDb}.sitemap_observations WHERE site_id = '${siteId}' AND job_run_id = '${jobRunId}' ORDER BY sitemap_url, crawled_url`;
+      const resSitemap = await clickhouse.query({ query: qSitemap, format: 'JSONEachRow' });
+      sitemapObservations = await resSitemap.json();
+    } catch (err: any) {
+      console.error('Failed to query sitemap_observations:', err.message);
+    }
+
+    try {
+      const qRender = `SELECT * FROM ${clickhouseDb}.render_observations WHERE site_id = '${siteId}' AND job_run_id = '${jobRunId}'`;
+      const resRender = await clickhouse.query({ query: qRender, format: 'JSONEachRow' });
+      renderObservations = await resRender.json();
+    } catch (err: any) {
+      console.error('Failed to query render_observations:', err.message);
+    }
+
+    try {
+      const qPagespeed = `SELECT * FROM ${clickhouseDb}.pagespeed_observations WHERE site_id = '${siteId}' AND job_run_id = '${jobRunId}'`;
+      const resPagespeed = await clickhouse.query({ query: qPagespeed, format: 'JSONEachRow' });
+      pagespeedObservations = await resPagespeed.json();
+    } catch (err: any) {
+      console.error('Failed to query pagespeed_observations:', err.message);
+    }
+
+    return {
+      crawlUrlObservations,
+      sitemapObservations,
+      renderObservations,
+      pagespeedObservations,
+    };
+  }
+
+  async getCrawlScreenshotStream(workspaceId: string, siteId: string, jobRunId: string, url: string) {
+    // 1. Verify site belongs to workspace
+    const siteResult = await db
+      .select({ projectId: sites.projectId })
+      .from(sites)
+      .innerJoin(projects, eq(sites.projectId, projects.id))
+      .where(and(eq(sites.id, siteId), eq(projects.workspaceId, workspaceId)))
+      .limit(1);
+
+    if (siteResult.length === 0) {
+      throw new NotFoundException('Site not found in this workspace');
+    }
+
+    // 2. Fetch the job run record to get the ingestionKey
+    const runResult = await db
+      .select({ ingestionKey: jobRuns.ingestionKey })
+      .from(jobRuns)
+      .where(and(
+        eq(jobRuns.id, jobRunId),
+        eq(jobRuns.workspaceId, workspaceId)
+      ))
+      .limit(1);
+
+    if (runResult.length === 0) {
+      throw new NotFoundException('Crawl job run not found');
+    }
+
+    const ingestionKey = runResult[0].ingestionKey;
+    if (!ingestionKey) {
+      throw new NotFoundException('Crawl job run has no ingestion key');
+    }
+
+    const urlHash = crypto.createHash('sha256').update(url).digest('hex');
+    const bucketName = process.env.S3_BUCKET || process.env.S3_BUCKET_NAME || 'seo-platform-raw';
+    const screenshotKey = `raw/screenshots/${workspaceId}/${siteId}/${ingestionKey}/${urlHash}.png`;
+
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: screenshotKey,
+        })
+      );
+
+      if (!response.Body) {
+        throw new NotFoundException('Screenshot body is empty');
+      }
+
+      return response.Body;
+    } catch (err: any) {
+      throw new NotFoundException(`Failed to retrieve screenshot from S3: ${err.message}`);
+    }
   }
 }

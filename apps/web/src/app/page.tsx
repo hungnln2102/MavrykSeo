@@ -197,32 +197,14 @@ export default function Page() {
         setApiLoading(true);
         setApiError(null);
 
-        // 1. Request magic-link and login
-        const magicLinkRes = await fetch('http://localhost:3000/auth/magic-link', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: 'demo.owner@example.test' }),
-        });
-
-        if (!magicLinkRes.ok) {
-          throw new Error('Failed to request magic link');
+        // 1. Check for stored auth token
+        const storedToken = localStorage.getItem('mavryk_token');
+        if (!storedToken) {
+          window.location.href = '/login';
+          return;
         }
 
-        const magicLinkData = await magicLinkRes.json();
-        const magicToken = magicLinkData.token;
-
-        const loginRes = await fetch('http://localhost:3000/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: magicToken }),
-        });
-
-        if (!loginRes.ok) {
-          throw new Error('Failed to login to API');
-        }
-
-        const loginData = await loginRes.json();
-        const jwtToken = loginData.token;
+        const jwtToken = storedToken;
         setToken(jwtToken);
 
         // 2. Fetch workspaces
@@ -233,6 +215,14 @@ export default function Page() {
         });
 
         if (!wsRes.ok) {
+          if (wsRes.status === 401) {
+            // Token expired or invalid — clear and redirect to login
+            localStorage.removeItem('mavryk_token');
+            localStorage.removeItem('mavryk_refresh_token');
+            localStorage.removeItem('mavryk_user');
+            window.location.href = '/login';
+            return;
+          }
           throw new Error('Failed to fetch workspaces');
         }
 

@@ -1,8 +1,9 @@
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { db, users, magicLinks, authSessions } from '@seo/db';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +28,86 @@ export class AuthService {
     );
 
     return { token: accessToken, refreshToken, user: newUser };
+  }
+
+  async registerWithPassword(
+    username: string,
+    password: string,
+    email?: string,
+    name?: string,
+    userAgent?: string,
+    ipAddress?: string,
+  ) {
+    // Check username uniqueness
+    const existingUsername = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, username))
+      .limit(1);
+    if (existingUsername.length > 0) {
+      throw new ConflictException('Username đã được sử dụng');
+    }
+
+    // Check email uniqueness if provided
+    if (email) {
+      const existingEmail = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      if (existingEmail.length > 0) {
+        throw new ConflictException('Email đã được sử dụng');
+      }
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const [newUser] = await db.insert(users).values({
+      username,
+      passwordHash,
+      email: email || null,
+      name: name || null,
+    }).returning();
+
+    const { accessToken, refreshToken } = await this.generateTokensAndCreateSession(
+      newUser.id,
+      newUser.email || newUser.username,
+      userAgent,
+      ipAddress,
+    );
+
+    return { token: accessToken, refreshToken, user: newUser };
+  }
+
+  async loginWithPassword(
+    username: string,
+    password: string,
+    userAgent?: string,
+    ipAddress?: string,
+  ) {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, username))
+      .limit(1);
+
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('Tên đăng nhập hoặc mật khẩu không đúng');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Tên đăng nhập hoặc mật khẩu không đúng');
+    }
+
+    const { accessToken, refreshToken } = await this.generateTokensAndCreateSession(
+      user.id,
+      user.email || user.username,
+      userAgent,
+      ipAddress,
+    );
+
+    return { token: accessToken, refreshToken, user };
   }
 
   async login(email: string) {

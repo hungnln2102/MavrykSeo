@@ -1,4 +1,4 @@
-import { db, projects, standardVersions, auditRuns, auditControls, auditControlResults, projectScopes } from '@seo/db';
+import { db, projects, standardVersions, auditRuns, auditControls, auditControlResults, projectScopes, sites, jobRuns } from '@seo/db';
 import { eq, and } from 'drizzle-orm';
 import { AuditsService } from './audits.service';
 import { NotFoundException } from '@nestjs/common';
@@ -17,7 +17,18 @@ jest.mock('@seo/db', () => ({
   auditControlResults: { id: 'auditControlResults.id', auditRunId: 'auditControlResults.auditRunId', controlId: 'auditControlResults.controlId', result: 'auditControlResults.result', exceptionReason: 'auditControlResults.exceptionReason', reviewerId: 'auditControlResults.reviewerId', updatedAt: 'auditControlResults.updatedAt' },
   auditModules: { id: 'auditModules.id', code: 'auditModules.code', name: 'auditModules.name' },
   projectScopes: { id: 'projectScopes.id', projectId: 'projectScopes.projectId', siteType: 'projectScopes.siteType' },
+  sites: { id: 'sites.id', projectId: 'sites.projectId', domain: 'sites.domain' },
+  jobRuns: { id: 'jobRuns.id', workspaceId: 'jobRuns.workspaceId', projectId: 'jobRuns.projectId', queueName: 'jobRuns.queueName', status: 'jobRuns.status', idempotencyKey: 'jobRuns.idempotencyKey' },
 }));
+
+jest.mock('bullmq', () => {
+  return {
+    Queue: jest.fn().mockImplementation(() => ({
+      add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    })),
+  };
+});
+
 
 jest.mock('drizzle-orm', () => ({
   eq: jest.fn((column: unknown, value: unknown) => ({ type: 'eq', column, value })),
@@ -92,10 +103,20 @@ describe('AuditsService', () => {
       // 6. Mock control results bulk insert
       mockInsert.mockReturnValueOnce({ values: jest.fn().mockResolvedValue(null) });
 
+      // 7. Mock select sites
+      const mockWhereSites = jest.fn().mockResolvedValue([{ id: 'site-1', domain: 'example.com' }]);
+      mockSelect.mockReturnValueOnce({ from: () => ({ where: mockWhereSites }) }); // select sites
+
+      // 8. Mock jobRuns insert
+      const mockReturningJobRun = jest.fn().mockResolvedValue([{ id: 'job-run-1' }]);
+      const mockOnConflictJobRun = jest.fn(() => ({ returning: mockReturningJobRun }));
+      const mockValuesJobRun = jest.fn(() => ({ onConflictDoNothing: mockOnConflictJobRun }));
+      mockInsert.mockReturnValueOnce({ values: mockValuesJobRun }); // jobRuns insert
+
       const newRun = await service.createAuditRun('ws-1', 'proj-1', 'ver-1');
       expect(newRun).toMatchObject({ id: 'run-1', projectId: 'proj-1', standardVersionId: 'ver-1' });
       expect(mockInsert).toHaveBeenCalledWith(auditRuns);
-      expect(mockSelect).toHaveBeenCalledTimes(4); // 4 selects now
+      expect(mockSelect).toHaveBeenCalledTimes(5); // 5 selects now
     });
   });
 

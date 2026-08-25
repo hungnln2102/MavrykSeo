@@ -342,7 +342,7 @@ describe('SitesService tenant scoping', () => {
       expect(mockS3Send).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'GetObjectCommand',
-          Bucket: 'seo-platform-raw',
+          Bucket: process.env.S3_BUCKET || 'seo-platform-raw',
         })
       );
     });
